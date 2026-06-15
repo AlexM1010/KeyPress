@@ -4,6 +4,9 @@ export namespace main {
 	    id: string;
 	    source: string;
 	    target: string;
+	    sourceHandle?: string;
+	    targetHandle?: string;
+	    type?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Edge(source);
@@ -14,6 +17,9 @@ export namespace main {
 	        this.id = source["id"];
 	        this.source = source["source"];
 	        this.target = source["target"];
+	        this.sourceHandle = source["sourceHandle"];
+	        this.targetHandle = source["targetHandle"];
+	        this.type = source["type"];
 	    }
 	}
 	export class Node {

@@ -37,6 +37,26 @@ export interface DelayNodeData extends NodeData {
     }
 }
 
-// Initialize writable stores with the correct types
-export const nodesData: Writable<NodeData[]> = writable([]);
-export const edgesData: Writable<Edge[]> = writable([]);
+// Default nodes for new flows
+const defaultNodes: NodeData[] = [
+  {
+    id: 'startnode-1',
+    type: 'StartNode',
+    position: { x: 100, y: 200 },
+    data: { label: 'Start', icon: 'Play', color: 'bg-gradient-to-r from-blue-500 to-blue-600' }
+  },
+  {
+    id: 'delaynode-1',
+    type: 'DelayNode',
+    position: { x: 400, y: 200 },
+    data: { delayType: 'Fixed', time: 1000 }
+  }
+];
+
+const defaultEdges: Edge[] = [
+  { id: 'edge-1', source: 'startnode-1', target: 'delaynode-1', type: 'smoothstep' }
+];
+
+// Initialize writable stores with default data
+export const nodesData: Writable<NodeData[]> = writable(defaultNodes);
+export const edgesData: Writable<Edge[]> = writable(defaultEdges);

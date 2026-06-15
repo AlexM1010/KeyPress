@@ -14,7 +14,7 @@
 
   // Import custom nodes, edges, and utilities
   import { nodesData as nodes, edgesData as edges } from "$lib/stores/flow";
-  import { onNodeDrag, onNodeDragStop, onLayout } from "$lib/utils/workspaceUtils";
+  import { onLayout } from "$lib/utils/autoLayout";
 
   // Nodes
   import { nodeTypes } from "$lib/components/customNodes/nodeTypes";
@@ -329,16 +329,23 @@
   async function loadLastOpenedFile() {
     try {
       const data = await window.go.main.App.LoadLastFile();
-      if (data) {
+      if (data && data.nodes && data.nodes.length > 0) {
         $nodes = data.nodes;
-        $edges = data.edges;
+        // Deduplicate edges by id to guard against corrupted saves missing handle data
+        const seen = new Set<string>();
+        $edges = (data.edges ?? []).filter((edge: { id: string }) => {
+          if (seen.has(edge.id)) return false;
+          seen.add(edge.id);
+          return true;
+        });
       }
+      // If no data or empty data, keep the default nodes from flow.ts
     } catch (error) {
       console.error("Failed to load last file:", error);
       addStatusMessage({
         id: `load-error-${Date.now()}`,
         type: "error",
-        message: "Failed to load last file: " + error
+        message: "Failed to load last file: " + (error instanceof Error ? error.message : String(error))
       });
     }
   }
@@ -380,8 +387,6 @@
       {colorMode}
       connectionMode={ConnectionMode.Loose}
       defaultEdgeOptions={defaultEdgeOptions}
-      on:nodedrag={!previewMode ? onNodeDrag : undefined}
-      on:nodedragstop={!previewMode ? onNodeDragStop : undefined}
       on:dragover={!previewMode ? onDragOver : undefined}
       on:drop={!previewMode ? onDrop : undefined}
       on:updateNodeData={handleNodeDataUpdate}

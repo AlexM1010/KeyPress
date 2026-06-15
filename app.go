@@ -41,9 +41,12 @@ type Node struct {
 
 // Edge represents a connection between two nodes.
 type Edge struct {
-	ID     string `json:"id"`
-	Source string `json:"source"`
-	Target string `json:"target"`
+	ID           string `json:"id"`
+	Source       string `json:"source"`
+	Target       string `json:"target"`
+	SourceHandle string `json:"sourceHandle,omitempty"`
+	TargetHandle string `json:"targetHandle,omitempty"`
+	Type         string `json:"type,omitempty"`
 }
 
 // Flowchart represents the entire flowchart with nodes and edges.

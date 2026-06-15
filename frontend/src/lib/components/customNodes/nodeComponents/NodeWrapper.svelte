@@ -22,6 +22,9 @@
     export let type: string;
     export let data: NodeData;
 
+    // Rest props to silence warnings
+    $$restProps;
+
     const dispatch = createEventDispatcher();
 
     // UI State Management
