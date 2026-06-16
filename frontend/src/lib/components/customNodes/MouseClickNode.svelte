@@ -10,7 +10,6 @@
     import TimeInput from "./nodeComponents/TimeInput.svelte";
     import NumberInput from './nodeComponents/NumberInput.svelte';
     import type { HandleConfig, MouseClickNodeData } from '$lib/stores/flow';
-    import "$lib/index.scss"; //TODO: remove all imports they are imported in frontend\components.json
 
     type ButtonType = 'left' | 'middle' | 'right';
     type ScrollDirection = 'Vertical' | 'Horizontal';

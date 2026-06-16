@@ -70,7 +70,6 @@
   export let targetX: $$Props["targetX"];
   export let targetY: $$Props["targetY"];
   export let targetPosition: $$Props["targetPosition"];
-  //export let markerEnd: $$Props["markerEnd"] = "url(#arrow)";
   export let style: $$Props["style"] = undefined;
 
   // State

@@ -38,10 +38,6 @@ export type BlockData = {
   colorStore?: string; // Add this if needed by ColorPickerNode
 };
 
-export type TextData = {
-  text: string;
-};
-
 export type BlockNode = Node<BlockData>;
 export type BlockProps = NodeProps<BlockNode>;
 

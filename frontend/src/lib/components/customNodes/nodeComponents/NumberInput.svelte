@@ -1,10 +1,6 @@
 <!-- frontend\src\lib\components\customNodes\NumberInput.svelte -->
 <script lang="ts">
-    //TODO: update input component primary colours based on header primary colour adjust components for dark mode
-    //TODO: add more tooltips to properly explain controls, allows more vauge descriptions  Sv-tooltip
-    //TODO: allow up and down arrows to be held not just clicked to change values quickly
     import { ChevronUp, ChevronDown } from 'lucide-svelte';
-    import "$lib/index.scss";
 
     export let label: string = '';
     export let value: number = 0;
@@ -27,7 +23,7 @@
         }
     }
 
-    $: inputWidth = `${Math.max(String(value).length * 0.6 + 1, 1)}em`; //TODO: max value not working? 
+    $: inputWidth = `${Math.max(String(value).length * 0.6 + 1, 1)}em`;
     $: if (maxValue !== null && value > maxValue) {
         value = maxValue;
         isInvalid = true;

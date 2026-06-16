@@ -49,12 +49,6 @@ type Edge struct {
 	Type         string `json:"type,omitempty"`
 }
 
-// Flowchart represents the entire flowchart with nodes and edges.
-type Flowchart struct {
-	Nodes []Node `json:"nodes"`
-	Edges []Edge `json:"edges"`
-}
-
 // FlowData represents the complete flow chart data structure
 type FlowData struct {
 	Nodes []Node `json:"nodes"`
@@ -213,10 +207,6 @@ func (q *TaskQueue) Stop() {
 	q.wg.Wait()
 	q.started = false
 	log.Println("TaskQueue has been stopped")
-}
-
-type Point struct {
-	X, Y float64
 }
 
 // executeTask performs the action based on the task type.
@@ -431,10 +421,9 @@ func executeTask(task Task, app *App) {
 
 		releaseAfterPress, _ := task.Data["releaseAfterPress"].(bool)
 
-		//TODO: standardise execution in order for all blcoks by how the block is displayed e.g clicks first then scroll
 		// Perform the click actions
 		if numberOfClicks > 0 {
-			log.Printf("Performing %v clicks with %v delay and %v press duration", //TODO: use this kind of scentence to summarise blocks on mininmise and log to console
+			log.Printf("Performing %v clicks with %v delay and %v press duration",
 				numberOfClicks, clickDuration, pressDuration)
 
 			for i := 0; i < int(numberOfClicks); i++ {
@@ -630,8 +619,8 @@ func (a *App) StartExecution(flow string) error {
 		}
 	}()
 
-	var flowchart Flowchart
-	err := json.Unmarshal([]byte(flow), &flowchart)
+	var flowData FlowData
+	err := json.Unmarshal([]byte(flow), &flowData)
 	if err != nil {
 		a.isExecuting = false
 		log.Printf("Failed to unmarshal flowchart: %v", err)
@@ -639,7 +628,7 @@ func (a *App) StartExecution(flow string) error {
 	}
 
 	// Validate flowchart
-	if len(flowchart.Nodes) == 0 {
+	if len(flowData.Nodes) == 0 {
 		a.isExecuting = false
 		log.Println("Flowchart validation failed: no nodes found")
 		return errors.New("flowchart must contain at least one node")
@@ -647,13 +636,13 @@ func (a *App) StartExecution(flow string) error {
 
 	// Build node map for easy access
 	a.nodeMap = make(map[string]Node)
-	for _, node := range flowchart.Nodes {
+	for _, node := range flowData.Nodes {
 		a.nodeMap[node.ID] = node
 	}
 
 	// Filter out unconnected nodes
 	connectedNodeIDs := make(map[string]bool)
-	for _, edge := range flowchart.Edges {
+	for _, edge := range flowData.Edges {
 		connectedNodeIDs[edge.Source] = true
 		connectedNodeIDs[edge.Target] = true
 	}
@@ -668,7 +657,7 @@ func (a *App) StartExecution(flow string) error {
 
 	// Build dependencies
 	a.dependencies = make(map[string][]string)
-	for _, edge := range flowchart.Edges {
+	for _, edge := range flowData.Edges {
 		a.dependencies[edge.Source] = append(a.dependencies[edge.Source], edge.Target)
 	}
 
@@ -678,7 +667,7 @@ func (a *App) StartExecution(flow string) error {
 	a.completedMux.Unlock()
 
 	// Enqueue initial tasks (StartNode)
-	startNode, err := a.findStartNode(flowchart.Nodes)
+	startNode, err := a.findStartNode(flowData.Nodes)
 	if err != nil {
 		a.isExecuting = false
 		log.Printf("StartExecution failed: %v", err)
@@ -775,24 +764,21 @@ func (a *App) handleCompletions() {
 
 // canEnqueue checks if all dependencies of a node are met.
 func (a *App) canEnqueue(nodeID string) bool {
-	// Find all nodes that this node depends on
-	var dependencies []string
+	var deps []string
 	for source, targets := range a.dependencies {
 		for _, target := range targets {
 			if target == nodeID {
-				dependencies = append(dependencies, source)
+				deps = append(deps, source)
 			}
 		}
 	}
 
-	// Check if all dependencies are completed
-	for _, dep := range dependencies {
-		a.completedMux.Lock()
+	a.completedMux.Lock()
+	defer a.completedMux.Unlock()
+	for _, dep := range deps {
 		if !a.completed[dep] {
-			a.completedMux.Unlock()
 			return false
 		}
-		a.completedMux.Unlock()
 	}
 	return true
 }

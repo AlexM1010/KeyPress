@@ -11,8 +11,4 @@ const routes = {
 
     '/Projects': Projects,
 
-    // Catch-all
-    // This is optional, but if present it must be the last
-    //TODO not found page
-    //'*': NotFound,
 }
