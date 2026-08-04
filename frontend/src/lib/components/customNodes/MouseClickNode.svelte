@@ -90,6 +90,11 @@
     function handleClick(type: ButtonType): void {
         updateButtonType(type);
     }
+
+    // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
+    // positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
+    // the "created with unknown prop" warnings for the ones we don't declare.
+    $$restProps;
 </script>
 
 <NodeWrapper
