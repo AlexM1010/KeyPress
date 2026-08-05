@@ -1,13 +1,6 @@
-import { items } from '$lib/data/projects';
-
-export const prerender = false; // Don't attempt to prerender dynamic routes 
-
-export function load({ params }: { params: Record<string, string> }) {
-	if (params.slug) {
-		const project = items.find((item) => {
-			return item.slug === params.slug;
-		});
-
-		return { project };
-	}
-}
+// A macro's graph is read from the Go runtime, which only exists inside the
+// running Wails app. There is nothing to resolve at build time, so this route
+// is neither prerendered nor server-rendered - the page loads its own data in
+// the browser. adapter-static serves it through the SPA fallback.
+export const prerender = false;
+export const ssr = false;
