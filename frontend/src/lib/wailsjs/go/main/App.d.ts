@@ -4,9 +4,13 @@ import {main} from '../models';
 
 export function GetIsExecuting():Promise<boolean>;
 
+export function ListProjects():Promise<Array<main.ProjectSummary>>;
+
 export function LoadLastFile():Promise<main.FlowData>;
 
-export function SaveFile(arg1:main.FlowData):Promise<string>;
+export function LoadProject(arg1:string):Promise<main.FlowData>;
+
+export function SaveFile(arg1:main.FlowData,arg2:string,arg3:string):Promise<string>;
 
 export function StartExecution(arg1:string):Promise<void>;
 

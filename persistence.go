@@ -1,0 +1,530 @@
+// persistence.go
+//
+// Loading and saving flow data on disk.
+//
+// Every saved macro is one JSON file in the app data directory
+// (utils.GetAppDataDir). The bare filename, without its extension, doubles as
+// the macro's id: it is what ListProjects hands out and what LoadProject
+// accepts back.
+
+package main
+
+import (
+	"Keypress/utils"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+	"unicode"
+)
+
+const (
+	// projectFileExt is the on-disk extension of every saved macro.
+	projectFileExt = ".json"
+
+	// maxProjectIDLen bounds ids so that no name - however long or hostile -
+	// can produce a path the filesystem rejects.
+	maxProjectIDLen = 128
+)
+
+// SaveFile writes the flow data to one JSON file per macro in the app data
+// directory, records it as the last opened file, and returns the macro's id.
+//
+// Despite what this function used to claim, it does not show a native Save File
+// dialog. That is deliberate rather than missing: the app owns its data
+// directory, and letting the user steer a macro anywhere on disk with
+// runtime.SaveFileDialog would put it outside the directory ListProjects
+// enumerates. The user picks a name; the app picks the location.
+//
+// name is the display name the user typed, slugified into the macro's id (its
+// bare filename). currentID is the id of the macro the caller already has open,
+// empty when this graph has never been saved. Names are unique:
+//
+//   - an empty or whitespace-only name is rejected. There is no longer a
+//     default_flow fallback - a macro saved by accident under a name nobody
+//     chose is worse than a save the user has to name;
+//   - a name whose id already exists on disk is rejected, UNLESS that id is
+//     currentID. Saving the macro you have open back over its own file is the
+//     ordinary update path and uniqueness must not stand in its way, or macros
+//     could be created but never edited.
+//
+// Two different display names can slugify to the same id ("My Macro" and
+// "my  macro" both give "my-macro"), and the check is on the id, so the second
+// one collides rather than quietly overwriting the first.
+//
+// Giving the open macro a new name is a rename, not a copy: the file it used to
+// live in is removed once the new one is safely on disk, so the macro list shows
+// it once under its new name instead of twice under both.
+func (a *App) SaveFile(flowData FlowData, name string, currentID string) (string, error) {
+	displayName := strings.TrimSpace(name)
+
+	id, staleFile, err := saveMacro(flowData, displayName, currentID)
+	if err != nil {
+		log.Printf("SaveFile %q: %v", name, err)
+		// Deliberately no "save-error" event: the bound call already rejects
+		// with this error, and the frontend surfaces it from there. Emitting
+		// as well would report every failure twice.
+		return "", err
+	}
+
+	// A rename whose old file survived is reported on the success event rather
+	// than as a failure, because the save itself is done: the graph is on disk
+	// under its new name and that is the macro the workspace now has open. The
+	// only consequence is a leftover the user will see in the macro list, so
+	// the message names it - being told about a file you can then delete
+	// yourself is better than wondering why the old name is still there.
+	message := fmt.Sprintf("Saved macro %q", displayName)
+	if staleFile != "" {
+		message = fmt.Sprintf("%s - its old file %q could not be removed and is still listed", message, staleFile)
+	}
+
+	a.emitEvent("save-success", message)
+	return id, nil
+}
+
+// saveMacro is the whole of SaveFile bar the logging and the event, split out
+// so that every failure path returns through one place.
+//
+// It returns the saved macro's id and, when this save renamed a macro whose old
+// file could not be deleted afterwards, the bare filename left behind. That
+// leftover is not an error - see SaveFile for why.
+//
+// displayName is expected already trimmed.
+func saveMacro(flowData FlowData, displayName string, currentID string) (id string, staleFile string, err error) {
+	if displayName == "" {
+		return "", "", errors.New("a macro name is required")
+	}
+
+	id = slugifyProjectID(displayName)
+	if id == "" {
+		// The name was entirely characters the slug drops (punctuation, or a
+		// script this ASCII slugifier cannot represent), so there is no
+		// filename to build. Say so rather than minting an opaque id the user
+		// would never recognise in the macro list.
+		return "", "", fmt.Errorf("macro name %q has no letters or digits to build a filename from", displayName)
+	}
+
+	fullPath, id, err := projectPath(id)
+	if err != nil {
+		return "", "", err
+	}
+
+	// The open macro's id also arrives from the frontend, and it decides
+	// whether an existing file may be overwritten - and now also which file
+	// gets DELETED on a rename - so it gets the same filename validation as any
+	// other id. Nothing downstream builds a path from the raw currentID.
+	openID := ""
+	if strings.TrimSpace(currentID) != "" {
+		openID, err = sanitizeProjectID(currentID)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid open macro id: %w", err)
+		}
+	}
+	isOwnFile := openID != "" && openID == id
+
+	// The id is the filename; a copy inside the file would only give the two a
+	// way to disagree after a rename.
+	flowData.ID = ""
+	flowData.Name = displayName
+
+	jsonData, err := json.MarshalIndent(flowData, "", "  ")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encode macro %q: %w", displayName, err)
+	}
+
+	// O_EXCL rather than a stat-then-write: the existence check and the create
+	// are one syscall, so a macro that appears between the two cannot be
+	// clobbered by the write that just checked it was absent. Only the macro
+	// already open gets O_TRUNC, and only onto its own file.
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if isOwnFile {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+
+	file, err := os.OpenFile(fullPath, flags, 0644)
+	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", "", fmt.Errorf("a macro named %q already exists (%s%s) - pick a different name", displayName, id, projectFileExt)
+		}
+		return "", "", fmt.Errorf("failed to save macro %q: %w", displayName, err)
+	}
+
+	if err := writeAndClose(file, jsonData); err != nil {
+		if !isOwnFile {
+			// This call created the file moments ago and it never became a
+			// valid macro; leaving the stub behind would block the retry.
+			if rmErr := os.Remove(fullPath); rmErr != nil {
+				log.Printf("saveMacro: failed to clean up %q: %v", fullPath, rmErr)
+			}
+		}
+		return "", "", fmt.Errorf("failed to write macro %q: %w", displayName, err)
+	}
+
+	// Everything past this point is bookkeeping around a macro that is already
+	// safely on disk, and none of it may turn a save that worked into a save
+	// the user is told failed.
+
+	// The id, not the path: the settings file must survive the data directory
+	// moving, and nothing that reads it should ever be handed a path it did not
+	// build itself.
+	if err := utils.SetLastOpenedProject(id); err != nil {
+		// The macro is safely on disk. Forgetting which one was open is a far
+		// smaller problem than telling the user the save failed when it did not.
+		log.Printf("saveMacro: failed to record %q as last opened: %v", id, err)
+	}
+
+	// The last-opened pointer is moved BEFORE the old file is removed so that a
+	// failed removal cannot leave the workspace reopening the macro under its
+	// old name; the worst case is a leftover file, never a lost or stale graph.
+	if openID != "" && !isOwnFile {
+		staleFile = removeRenamedFile(openID, fullPath)
+	}
+
+	return id, staleFile, nil
+}
+
+// removeRenamedFile deletes the file a macro used to live in after it has been
+// re-saved under a new id.
+//
+// It is called only once the new file has been written AND closed, so the graph
+// exists in two places for the moment this runs and in one place afterwards -
+// never in none. openID has already been through sanitizeProjectID; projectPath
+// puts it through again, because this is the one place an id from the frontend
+// decides what gets deleted and a second pass costs nothing.
+//
+// newPath is the file just written, and is compared against purely as a
+// backstop: the caller has established that the ids differ, and ids map to
+// paths one-to-one, so this can only fire if that ever stops being true.
+//
+// Failure is reported by returning the bare filename left behind rather than an
+// error, because there is nothing here the caller should treat as a failed save.
+func removeRenamedFile(openID string, newPath string) string {
+	oldPath, oldID, err := projectPath(openID)
+	if err != nil {
+		log.Printf("removeRenamedFile: refusing to remove the old file for %q: %v", openID, err)
+		return ""
+	}
+	if oldPath == newPath {
+		log.Printf("removeRenamedFile: old and new macro resolve to the same file %q; nothing removed", oldPath)
+		return ""
+	}
+
+	// The rename is only genuine if the old id really was a macro file. A
+	// currentID pointing at nothing (a macro deleted from under the app, say)
+	// means there is simply nothing to tidy up.
+	info, err := os.Stat(oldPath)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("removeRenamedFile: cannot inspect %q: %v", oldPath, err)
+		}
+		return ""
+	}
+	if !info.Mode().IsRegular() {
+		log.Printf("removeRenamedFile: %q is not a regular file; leaving it alone", oldPath)
+		return ""
+	}
+
+	if err := os.Remove(oldPath); err != nil {
+		log.Printf("removeRenamedFile: failed to remove %q after rename: %v", oldPath, err)
+		return oldID + projectFileExt
+	}
+
+	return ""
+}
+
+// writeAndClose writes data to file and closes it, reporting whichever of the
+// two failed. Close is what surfaces a failed flush, so its error matters.
+func writeAndClose(file *os.File, data []byte) error {
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+// ListProjects enumerates the saved macros in the app data directory.
+//
+// A file that is not readable, is not valid JSON, or is JSON but not a flow is
+// skipped and logged: one stray file in the data directory must not take the
+// whole listing down with it.
+func (a *App) ListProjects() ([]ProjectSummary, error) {
+	dataDir, err := utils.GetAppDataDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data directory: %w", err)
+	}
+
+	// Built with make, never nil: a nil slice marshals to JSON null and the
+	// frontend expects an array.
+	summaries := make([]ProjectSummary, 0, len(entries))
+
+	for _, entry := range entries {
+		filename := entry.Name()
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(filename), projectFileExt) {
+			continue
+		}
+
+		fullPath, id, err := projectPath(filename)
+		if err != nil {
+			log.Printf("ListProjects: skipping %q: %v", filename, err)
+			continue
+		}
+
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			log.Printf("ListProjects: skipping %q: %v", filename, err)
+			continue
+		}
+
+		var flowData FlowData
+		if err := json.Unmarshal(data, &flowData); err != nil {
+			log.Printf("ListProjects: skipping %q: not valid JSON: %v", filename, err)
+			continue
+		}
+		if flowData.Nodes == nil {
+			// Parses, but has no "nodes" key at all - some other JSON file
+			// that happens to live in the data directory.
+			log.Printf("ListProjects: skipping %q: no nodes, not a flow file", filename)
+			continue
+		}
+
+		modifiedAt := ""
+		if info, err := entry.Info(); err == nil {
+			modifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+		} else {
+			log.Printf("ListProjects: no modification time for %q: %v", filename, err)
+		}
+
+		summaries = append(summaries, ProjectSummary{
+			ID:         id,
+			Name:       projectDisplayName(flowData.Name, id),
+			NodeCount:  len(flowData.Nodes),
+			EdgeCount:  len(flowData.Edges),
+			ModifiedAt: modifiedAt,
+		})
+	}
+
+	// Most recently touched first, falling back to the id so the order is
+	// stable when two files share a timestamp (or have none).
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].ModifiedAt != summaries[j].ModifiedAt {
+			return summaries[i].ModifiedAt > summaries[j].ModifiedAt
+		}
+		return summaries[i].ID < summaries[j].ID
+	})
+
+	return summaries, nil
+}
+
+// LoadProject loads a single saved macro by the id ListProjects handed out.
+//
+// The id arrives from the frontend and is turned into a path, so it is
+// validated as a bare filename first - see sanitizeProjectID.
+func (a *App) LoadProject(id string) (*FlowData, error) {
+	fullPath, cleanID, err := projectPath(id)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read project %q: %w", cleanID, err)
+	}
+
+	var flowData FlowData
+	if err := json.Unmarshal(data, &flowData); err != nil {
+		return nil, fmt.Errorf("failed to parse project %q: %w", cleanID, err)
+	}
+
+	flowData.ID = cleanID
+	flowData.Name = projectDisplayName(flowData.Name, cleanID)
+	return &flowData, nil
+}
+
+// LoadLastFile loads the macro the workspace had open when it was last used,
+// returning nil without an error when there is none to load.
+//
+// The macro is recorded in the settings file as an id, not a path, so this is
+// LoadProject by another name: the id goes through the same projectPath
+// validation, which is what keeps a hand-edited config.json from naming a file
+// outside the data directory. An id that fails it is treated as no last macro
+// at all - the app opens on an empty canvas rather than refusing to start over
+// a setting.
+//
+// "Nothing to load" also covers the macro having been deleted since. The
+// remaining errors are a file that is there but unreadable or not a flow, which
+// the user should be told about rather than have silently swallowed.
+func (a *App) LoadLastFile() (*FlowData, error) {
+	id := utils.LoadConfig().LastOpenedProject
+	if strings.TrimSpace(id) == "" {
+		return nil, nil
+	}
+
+	fullPath, cleanID, err := projectPath(id)
+	if err != nil {
+		log.Printf("LoadLastFile: ignoring the recorded last opened macro: %v", err)
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Deleted from the macro list, or from the data directory by hand.
+			log.Printf("LoadLastFile: last opened macro %q no longer exists", cleanID)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read last opened macro %q: %w", cleanID, err)
+	}
+
+	var flowData FlowData
+	if err := json.Unmarshal(data, &flowData); err != nil {
+		return nil, fmt.Errorf("failed to parse last opened macro %q: %w", cleanID, err)
+	}
+
+	// The id is the filename, so it is not in the file - but the caller needs it
+	// to save this macro back over its own file rather than be told the name is
+	// already taken.
+	flowData.ID = cleanID
+	flowData.Name = projectDisplayName(flowData.Name, cleanID)
+	return &flowData, nil
+}
+
+// projectPath resolves a macro id to its absolute path inside the app data
+// directory, returning the validated bare id alongside it. The id may be given
+// with or without the .json extension.
+func projectPath(id string) (fullPath string, cleanID string, err error) {
+	cleanID, err = sanitizeProjectID(id)
+	if err != nil {
+		return "", "", err
+	}
+
+	dataDir, err := utils.GetAppDataDir()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get data directory: %w", err)
+	}
+
+	dataDir = filepath.Clean(dataDir)
+	fullPath = filepath.Clean(filepath.Join(dataDir, cleanID+projectFileExt))
+
+	// Belt and braces. sanitizeProjectID has already rejected everything that
+	// could traverse, but the value came from the frontend, so confirm the
+	// joined path really did land directly in the data directory.
+	if filepath.Dir(fullPath) != dataDir {
+		return "", "", fmt.Errorf("invalid project id %q: escapes the data directory", id)
+	}
+
+	return fullPath, cleanID, nil
+}
+
+// sanitizeProjectID validates an id that arrived from the frontend and returns
+// the bare filename (no extension) it maps to.
+//
+// The id is treated strictly as a filename: anything that could reach outside
+// the app data directory - path separators, volume letters, "..", a leading dot
+// - is rejected outright rather than cleaned up, because a "repaired" id would
+// silently address a different file than the caller asked for.
+func sanitizeProjectID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("project id is empty")
+	}
+
+	if strings.EqualFold(filepath.Ext(id), projectFileExt) {
+		id = id[:len(id)-len(projectFileExt)]
+	}
+	if id == "" {
+		return "", fmt.Errorf("project id is empty")
+	}
+
+	if len(id) > maxProjectIDLen {
+		return "", fmt.Errorf("project id is too long (%d > %d)", len(id), maxProjectIDLen)
+	}
+	if strings.Contains(id, "..") {
+		return "", fmt.Errorf("invalid project id %q: contains %q", id, "..")
+	}
+	if strings.HasPrefix(id, ".") {
+		return "", fmt.Errorf("invalid project id %q: starts with a dot", id)
+	}
+	if strings.ContainsAny(id, `/\:`) || id != filepath.Base(id) || filepath.IsAbs(id) {
+		return "", fmt.Errorf("invalid project id %q: must be a bare filename", id)
+	}
+
+	for _, r := range id {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		if r == '-' || r == '_' || r == '.' || r == ' ' {
+			continue
+		}
+		return "", fmt.Errorf("invalid project id %q: unsupported character %q", id, r)
+	}
+
+	return id, nil
+}
+
+// slugifyProjectID turns a user-supplied macro name into a safe bare filename.
+// Everything outside [a-z0-9_-] collapses to a single dash. The result can be
+// empty (for a name made entirely of dropped characters); callers decide what
+// to do about that.
+func slugifyProjectID(name string) string {
+	var b strings.Builder
+	pendingDash := false
+
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			if pendingDash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			pendingDash = false
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			if b.Len() > 0 {
+				pendingDash = false
+				b.WriteRune(r)
+			}
+		default:
+			pendingDash = true
+		}
+	}
+
+	slug := strings.Trim(b.String(), "-_")
+	if len(slug) > maxProjectIDLen {
+		slug = strings.Trim(slug[:maxProjectIDLen], "-_")
+	}
+
+	return slug
+}
+
+// projectDisplayName returns the stored name of a macro, falling back to one
+// derived from its id for files saved before macros carried a name.
+func projectDisplayName(stored string, id string) string {
+	if name := strings.TrimSpace(stored); name != "" {
+		return name
+	}
+
+	words := strings.FieldsFunc(id, func(r rune) bool {
+		return r == '-' || r == '_' || r == ' '
+	})
+	if len(words) == 0 {
+		return id
+	}
+
+	for i, word := range words {
+		runes := []rune(word)
+		runes[0] = unicode.ToUpper(runes[0])
+		words[i] = string(runes)
+	}
+
+	return strings.Join(words, " ")
+}

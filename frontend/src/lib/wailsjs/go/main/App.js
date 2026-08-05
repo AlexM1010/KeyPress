@@ -6,12 +6,20 @@ export function GetIsExecuting() {
   return window['go']['main']['App']['GetIsExecuting']();
 }
 
+export function ListProjects() {
+  return window['go']['main']['App']['ListProjects']();
+}
+
 export function LoadLastFile() {
   return window['go']['main']['App']['LoadLastFile']();
 }
 
-export function SaveFile(arg1) {
-  return window['go']['main']['App']['SaveFile'](arg1);
+export function LoadProject(arg1) {
+  return window['go']['main']['App']['LoadProject'](arg1);
+}
+
+export function SaveFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveFile'](arg1, arg2, arg3);
 }
 
 export function StartExecution(arg1) {

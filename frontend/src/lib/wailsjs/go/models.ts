@@ -41,6 +41,8 @@ export namespace main {
 	    }
 	}
 	export class FlowData {
+	    id?: string;
+	    name?: string;
 	    nodes: Node[];
 	    edges: Edge[];
 	
@@ -50,6 +52,8 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
 	        this.nodes = this.convertValues(source["nodes"], Node);
 	        this.edges = this.convertValues(source["edges"], Edge);
 	    }
@@ -71,6 +75,27 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	
+	export class ProjectSummary {
+	    id: string;
+	    name: string;
+	    nodeCount: number;
+	    edgeCount: number;
+	    modifiedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProjectSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.nodeCount = source["nodeCount"];
+	        this.edgeCount = source["edgeCount"];
+	        this.modifiedAt = source["modifiedAt"];
+	    }
 	}
 
 }
