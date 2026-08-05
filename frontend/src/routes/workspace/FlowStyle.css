@@ -66,18 +66,6 @@
     text-align: right;
 }
 
-/* Preview mode renders a saved macro as a static picture. Killing pointer
-   events across the whole flow is what actually makes it read-only: the
-   interaction flags on <SvelteFlow> stop panning, zooming and dragging, but the
-   inputs inside custom nodes would still be reachable and they mutate node data
-   in place. The descendant selector is deliberate - `pointer-events` is
-   inherited, but Svelte Flow's own stylesheet sets `pointer-events: all` on
-   nodes, handles and the pane, which would otherwise win over inheritance. */
-.flow-preview .svelte-flow,
-.flow-preview .svelte-flow * {
-    pointer-events: none;
-}
-
 /* Skipped-node mark.
    ------------------
    Nodes a run left out because nothing connects them to the Start node get an

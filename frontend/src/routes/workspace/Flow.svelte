@@ -10,16 +10,21 @@
     ConnectionMode,
     useSvelteFlow,
   } from "@xyflow/svelte";
-  import type { DefaultEdgeOptions, Edge } from "@xyflow/svelte";
-  import type { Writable } from "svelte/store";
+  import type { DefaultEdgeOptions } from "@xyflow/svelte";
 
   // Import custom nodes, edges, and utilities
   import {
-    nodesData as workspaceNodes,
-    edgesData as workspaceEdges,
+    nodesData,
+    edgesData,
+    macroName,
+    macroID,
+    isWorkspaceHydrated,
+    markWorkspaceHydrated,
+    openMacroInWorkspace,
     type FlowNode,
   } from "$lib/stores/flow";
   import { onLayout } from "$lib/utils/autoLayout";
+  import { describeError } from "$lib/utils/helpers";
 
   // Generated Wails bindings for the Go backend
   import {
@@ -60,30 +65,6 @@
 
   $: expandedClass = $isExpanded ? 'expanded' : '';
 
-  /**
-   * Renders read-only: no toolbar, no side panels, no pointer interaction, and
-   * none of the workspace's disk I/O (see `onMount` below).
-   */
-  export let previewMode: boolean = false;
-
-  /**
-   * Graph to render, overriding the shared workspace stores.
-   *
-   * Both default to `undefined` so the workspace keeps using the global stores
-   * exactly as before. A caller that supplies them - the project preview - MUST
-   * pass store instances of its own: node components mutate their `data`
-   * payload in place and that writes straight through to whatever store backs
-   * the graph, so handing these the workspace stores would let a preview edit
-   * the user's live flow.
-   */
-  export let nodes: Writable<FlowNode[]> | undefined = undefined;
-  export let edges: Writable<Edge[]> | undefined = undefined;
-
-  // Resolved once at construction: these props are set by the parent when the
-  // component is created and are not swapped afterwards.
-  const activeNodes: Writable<FlowNode[]> = nodes ?? workspaceNodes;
-  const activeEdges: Writable<Edge[]> = edges ?? workspaceEdges;
-
   // NOTE: node edits do not travel back up through Svelte events. `<SvelteFlow>`
   // instantiates the custom node components itself from `nodeTypes`, so they are not
   // children of this component and a `createEventDispatcher` event from one of them
@@ -110,11 +91,6 @@
   // Toggle the left panel expansion
   function toggleLeftPanel() {
     isLeftPanelExpanded = !isLeftPanelExpanded;
-  }
-
-  if (previewMode) {
-    isLeftPanelExpanded = false;
-    isStatusPanelExpanded = false;
   }
 
   // Handle drag over event to allow dropping nodes onto the flow
@@ -146,7 +122,7 @@
       data: {},
     };
 
-    $activeNodes = [...$activeNodes, newNode];
+    $nodesData = [...$nodesData, newNode];
   };
 
   // Status messages
@@ -221,10 +197,9 @@
    * below, because a literal `<style>` string in this block would be mistaken
    * for the component's own style block by the preprocessor.
    *
-   * Scoped to `.flow-container:not(.flow-preview)` so a read-only project
-   * preview sharing the page can never be marked by the workspace's run - the
-   * preview keeps its own stores and never subscribes to execution events, but
-   * a stylesheet in `<head>` is global and ids could in principle coincide.
+   * Scoped to `.flow-container` rather than left bare because a stylesheet in
+   * `<head>` is global: confining it to a canvas keeps it from reaching any
+   * other element that happens to carry a matching `data-id`.
    *
    * `--node-skipped-glow` is consumed by the `.svelte-flow__node` rule in
    * FlowStyle.css, which owns what the mark looks like.
@@ -232,10 +207,7 @@
   function buildSkippedGlowCss(nodeIds: string[]): string {
     const selectors = nodeIds
       .filter((id) => SELECTOR_SAFE_NODE_ID.test(id))
-      .map(
-        (id) =>
-          `.flow-container:not(.flow-preview) .svelte-flow__node[data-id="${id}"]`
-      );
+      .map((id) => `.flow-container .svelte-flow__node[data-id="${id}"]`);
     if (selectors.length === 0) return "";
     return (
       `${selectors.join(",")}{--node-skipped-glow:` +
@@ -586,37 +558,9 @@
 
   let saveState: SaveState = { status: 'idle' };
 
-  /**
-   * Name the macro is saved under. Each name gets its own JSON file in the app
-   * data directory, so this is what makes more than one saved macro possible.
-   * The backend rejects an empty name and a name already taken by another
-   * macro, so this is not merely decorative - see `handleSave`.
-   */
-  let macroName = "";
-
-  /**
-   * Id (bare filename) of the macro currently open, or "" when this graph has
-   * never been saved.
-   *
-   * The backend needs it to tell "save my own macro again" from "create a macro
-   * whose name is already taken": names are unique, but that rule must not stop
-   * the user updating the macro in front of them. `LoadProject` knows the id it
-   * was asked for, and `LoadLastFile` reads the id the app recorded in its
-   * config, so both arrive with one on `FlowData`. A successful save reports the
-   * id it wrote, which is how a rename moves us onto the new file.
-   */
-  let currentProjectID = "";
-
-  /**
-   * Wails rejects a bound call with the Go error's text as a plain string, not
-   * an `Error`, so reading `.message` alone would throw away every backend
-   * reason - exactly the ones the user needs here.
-   */
-  function describeError(error: unknown): string {
-    if (typeof error === "string") return error;
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
+  // The macro's name and id live in `$lib/stores/flow` rather than here, because
+  // the macro list can now open a macro straight into the workspace and its
+  // identity has to arrive with its graph. See `openMacroInWorkspace`.
 
   // Clear a stale rejection as soon as the user starts fixing the name it was
   // about, so the message on screen always refers to what is in the field.
@@ -625,21 +569,17 @@
   }
 
   async function handleSave() {
-    // Preview mode renders someone else's macro read-only and has no toolbar;
-    // guarding here too keeps that true if it ever grows a keyboard shortcut.
-    if (previewMode) return;
-
     try {
       saveState = { status: 'saving' };
       const currentFlowData = toObject();
       const savedID = await SaveFile(
         main.FlowData.createFrom(currentFlowData),
-        macroName.trim(),
-        currentProjectID
+        $macroName.trim(),
+        $macroID
       );
       // Now editing whatever we just wrote: saving again overwrites it instead
       // of colliding with it, and a rename lands on the new file.
-      currentProjectID = savedID;
+      $macroID = savedID;
       saveState = { status: 'success' };
       setTimeout(() => {
         if (saveState.status === 'success') saveState = { status: 'idle' };
@@ -802,59 +742,44 @@
   async function loadLastOpenedFile() {
     try {
       const data = await LoadLastFile();
-      if (!data) return;
-
-      // Identity is adopted even from a macro whose graph is empty: otherwise a
-      // macro the user had deleted every node from would come back nameless,
-      // and saving it again would be refused as a name someone else owns.
-      macroName = data.name ?? "";
-      // Empty when the last file predates the id scheme (an old save-dialog
-      // path outside the data directory); saving then behaves as a new macro.
-      currentProjectID = data.id ?? "";
-
-      if (data.nodes && data.nodes.length > 0) {
-        // A different graph is about to replace this one, so the previous
-        // graph's skip marks go with it. Ids are per-graph and the highlight
-        // matches on them, so a stale mark could not land on a node of the new
-        // macro anyway - but leaving the list populated would keep a stylesheet
-        // in <head> describing nodes that no longer exist.
-        skippedNodeIds = [];
-        // The Go model types position as a loose number map, so narrow it back
-        // to the { x, y } shape Svelte Flow expects.
-        $activeNodes = data.nodes.map((node) => ({
-          id: node.id,
-          type: node.type,
-          data: node.data ?? {},
-          position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
-        }));
-        // Saved edges carry their own handle ids, so they are used exactly as
-        // they come off disk: `getEdgeId` derives an edge's id from those
-        // handles, so two edges between the same pair of handles can no longer
-        // end up sharing an id - which is the one thing a keyed `{#each}`
-        // cannot survive.
-        $activeEdges = data.edges ?? [];
+      if (!data) {
+        // Nothing saved yet. The canvas keeps the defaults from flow.ts, and
+        // they count as hydrated - coming back from the macro list must not
+        // wipe out whatever the user has built on top of them since.
+        markWorkspaceHydrated();
+        return;
       }
-      // If no data or empty data, keep the default nodes from flow.ts
+
+      // A different graph is about to replace this one, so the previous graph's
+      // skip marks go with it. Ids are per-graph and the highlight matches on
+      // them, so a stale mark could not land on a node of the new macro anyway
+      // - but leaving the list populated would keep a stylesheet in <head>
+      // describing nodes that no longer exist.
+      skippedNodeIds = [];
+
+      // Adopts the graph, the name and the id, and marks the workspace
+      // hydrated. `data` is a fresh parse from the backend and nothing else
+      // holds a reference to it, which is what this call requires.
+      openMacroInWorkspace(data);
     } catch (error) {
       console.error("Failed to load last file:", error);
       addStatusMessage({
         id: `load-error-${Date.now()}`,
         type: "error",
-        message: "Failed to load last file: " + (error instanceof Error ? error.message : String(error))
+        message: "Failed to load last file: " + describeError(error)
       });
     }
   }
 
   // Initialize event listeners when the component mounts.
   //
-  // A preview does neither: it renders a graph its parent already loaded, and
-  // `loadLastOpenedFile` would overwrite that graph with the workspace's own
-  // last-saved flow. The execution/save events it would subscribe to belong to
-  // the workspace too.
+  // The last opened macro is read once per app run, not once per mount. This is
+  // a route, so every trip to the macro list and back remounts it, and reading
+  // again here would throw away both the macro the user just opened from that
+  // list and any unsaved edits they had made before leaving.
   onMount(() => {
-    if (previewMode) return;
     setupEventListeners();
-    loadLastOpenedFile();
+    if (!isWorkspaceHydrated()) loadLastOpenedFile();
   });
 </script>
 
@@ -872,19 +797,17 @@
   {/if}
 </svelte:head>
 
-<div class="flow-container flex" class:flow-preview={previewMode}>
+<div class="flow-container flex">
   <!-- Left Panel -->
-  {#if !previewMode && isLeftPanelExpanded}
+  {#if isLeftPanelExpanded}
     <LeftPanel />
   {/if}
 
-  {#if !previewMode}
-    <!-- Left Panel Toggle Button -->
-    <LeftPanelToggleButton
-      {isLeftPanelExpanded}
-      {toggleLeftPanel}
-    />
-  {/if}
+  <!-- Left Panel Toggle Button -->
+  <LeftPanelToggleButton
+    {isLeftPanelExpanded}
+    {toggleLeftPanel}
+  />
 
   <!-- Main Flow Area -->
   <div
@@ -895,118 +818,103 @@
     class:pr-0={!isStatusPanelExpanded}
   >
     <SvelteFlow
-      nodes={activeNodes}
+      nodes={nodesData}
       {nodeTypes}
-      edges={activeEdges}
+      edges={edgesData}
       {edgeTypes}
       {colorMode}
       connectionMode={ConnectionMode.Loose}
       defaultEdgeOptions={defaultEdgeOptions}
-      on:dragover={!previewMode ? onDragOver : undefined}
-      on:drop={!previewMode ? onDrop : undefined}
-      proOptions={{ hideAttribution: previewMode }}
-      nodesDraggable={!previewMode}
-      nodesConnectable={!previewMode}
-      elementsSelectable={!previewMode}
-      panOnDrag={!previewMode}
-      zoomOnScroll={!previewMode}
-      zoomOnPinch={!previewMode}
-      zoomOnDoubleClick={!previewMode}
-      preventScrolling={!previewMode}
-      deleteKey={previewMode ? null : "Backspace"}
+      on:dragover={onDragOver}
+      on:drop={onDrop}
+      deleteKey="Backspace"
       fitView
     >
       <!-- Custom connection line -->
       <ConnectionLine slot="connectionLine" />
       <!-- Control Panel -->
-      {#if !previewMode}
-        <Panel position="top-right">
-          <div class="flex flex-col items-end">
-            <div class="nav-button-container flex-center flex-gap transition-transform duration-300 {expandedClass}">
-              <!-- Macro name: decides which file on disk the save writes to.
-                   Required, and unique across macros - a rejected save reports
-                   why just below. -->
-              <input
-                class="flow-name-input"
-                class:flow-name-input-invalid={saveState.status === 'error'}
-                type="text"
-                bind:value={macroName}
-                on:input={clearSaveError}
-                placeholder="Macro name"
-                aria-label="Macro name"
-                aria-invalid={saveState.status === 'error'}
+      <Panel position="top-right">
+        <div class="flex flex-col items-end">
+          <div class="nav-button-container flex-center flex-gap transition-transform duration-300 {expandedClass}">
+            <!-- Macro name: decides which file on disk the save writes to.
+                 Required, and unique across macros - a rejected save reports
+                 why just below. -->
+            <input
+              class="flow-name-input"
+              class:flow-name-input-invalid={saveState.status === 'error'}
+              type="text"
+              bind:value={$macroName}
+              on:input={clearSaveError}
+              placeholder="Macro name"
+              aria-label="Macro name"
+              aria-invalid={saveState.status === 'error'}
+            />
+            <!-- Run Flow Button -->
+            <button
+              class="flow-button"
+              on:click={handleRunFlow}
+              disabled={isExecuting}
+            >
+              <svelte:component
+                this={executionStatus.icon}
+                class="flow-icon {executionStatus.color}"
+                style={isExecuting ? "animation: spin 1s linear infinite" : ""}
               />
-              <!-- Run Flow Button -->
-              <button
-                class="flow-button"
-                on:click={handleRunFlow}
-                disabled={isExecuting}
-              >
-                <svelte:component
-                  this={executionStatus.icon}
-                  class="flow-icon {executionStatus.color}"
-                  style={isExecuting ? "animation: spin 1s linear infinite" : ""}
-                />
-              </button>
-              <!-- Save Button -->
-              <button 
-                class="flow-button" 
-                on:click={handleSave} 
-                disabled={saveState.status === 'saving'}
-              >
-                <svelte:component
-                  this={
-                    saveState.status === 'saving' ? Loader :
-                    saveState.status === 'error' ? X :
-                    saveState.status === 'success' ? Check :
-                    Save
-                  }
-                  class="flow-icon"
-                  style={saveState.status === 'saving' ? "animation: spin 1s linear infinite" : ""}
-                />
-              </button>
-              <!-- Layout Button. `onLayout` rearranges the workspace stores
-                   directly; the button only exists outside preview mode. -->
-              <button
-                class="flow-button"
-                on:click={() => onLayout("TB")}
-              >
-                <LayoutDashboard class="flow-icon" />
-                <span>Layout</span>
-              </button>
-            </div>
-            {#if saveState.status === 'error'}
-              <!-- Below the toolbar row, which already carries the navbar
-                   offset, so this needs no `expanded` class of its own. -->
-              <p class="flow-save-error" role="alert">
-                {saveState.message}
-              </p>
-            {/if}
+            </button>
+            <!-- Save Button -->
+            <button
+              class="flow-button"
+              on:click={handleSave}
+              disabled={saveState.status === 'saving'}
+            >
+              <svelte:component
+                this={
+                  saveState.status === 'saving' ? Loader :
+                  saveState.status === 'error' ? X :
+                  saveState.status === 'success' ? Check :
+                  Save
+                }
+                class="flow-icon"
+                style={saveState.status === 'saving' ? "animation: spin 1s linear infinite" : ""}
+              />
+            </button>
+            <!-- Layout Button. `onLayout` rearranges the workspace stores
+                 directly. -->
+            <button
+              class="flow-button"
+              on:click={() => onLayout("TB")}
+            >
+              <LayoutDashboard class="flow-icon" />
+              <span>Layout</span>
+            </button>
           </div>
-        </Panel>
-        <!-- Flow Controls -->
-        <Controls />
-        <MiniMap />
-      {/if}
+          {#if saveState.status === 'error'}
+            <!-- Below the toolbar row, which already carries the navbar
+                 offset, so this needs no `expanded` class of its own. -->
+            <p class="flow-save-error" role="alert">
+              {saveState.message}
+            </p>
+          {/if}
+        </div>
+      </Panel>
+      <!-- Flow Controls -->
+      <Controls />
+      <MiniMap />
       <Background />
     </SvelteFlow>
   </div>
 
-  {#if !previewMode}
-    <!-- Status Panel Toggle Button -->
-    <StatusPanelToggleButton
-      {isStatusPanelExpanded}
-      {hasStatusPanel}
-      {toggleStatusPanel}
-    />
-  {/if}
+  <!-- Status Panel Toggle Button -->
+  <StatusPanelToggleButton
+    {isStatusPanelExpanded}
+    {hasStatusPanel}
+    {toggleStatusPanel}
+  />
 
   <!-- Status Panel -->
-  {#if !previewMode}
-    <StatusPanel
-      {isStatusPanelExpanded}
-      {statusMessages}
-      {executionStatus}
-    />
-  {/if}
+  <StatusPanel
+    {isStatusPanelExpanded}
+    {statusMessages}
+    {executionStatus}
+  />
 </div>

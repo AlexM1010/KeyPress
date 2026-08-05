@@ -84,6 +84,23 @@ body {
 	margin: 0px;
 }
 
+/* Loader spin animation.
+   ----------------------
+   Lives here rather than only in FlowStyle.css because that stylesheet arrives
+   with the workspace's Flow component, and pages that spin a loader without
+   rendering a flow - the macro list - would otherwise show a stationary
+   "spinner". Every page imports this file. FlowStyle.css still declares an
+   identical set for its own sake; whichever lands last, the animation is the
+   same. */
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 * {
 	transition-duration: 200ms;
 	transition-property: background, border-color, opacity, box-shadow, top, bottom, left, margin, right;
