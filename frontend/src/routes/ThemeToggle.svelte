@@ -2,13 +2,14 @@
 <script lang="ts">
     import Sun from 'lucide-svelte/icons/sun';
     import Moon from 'lucide-svelte/icons/moon';
-    import { setMode } from "mode-watcher";
-    import { theme } from '$lib/stores/theme';
+    import { theme, toggleTheme } from '$lib/stores/theme';
 
     let spin = false;
 
+    // Reading `$theme` also keeps the store subscribed for this component's
+    // lifetime, which is what keeps <html data-theme> in sync (see theme.ts).
     function toggleColorScheme() {
-        setMode($theme ? 'light' : 'dark');
+        toggleTheme(!$theme);
         triggerSpin(300);
     }
 
@@ -37,7 +38,7 @@
     }
 </style>
 
-<button 
+<button
     class="theme-toggle-btn"
     on:click={toggleColorScheme}
     type="button"
