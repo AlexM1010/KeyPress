@@ -7,7 +7,6 @@
     import type { HandleConfig } from "../types";
     import ContextMenu from "./ContextMenu.svelte";
     import { cubicOut } from "svelte/easing";
-    import { nodesData as nodes, type NodeData } from '$lib/stores/flow';
     import { createEventDispatcher } from 'svelte';
     import '$lib/index.scss';
 
@@ -20,7 +19,11 @@
     export let handles: HandleConfig[] = [];
     export let id: string;
     export let type: string;
-    export let data: NodeData;
+
+    // NOTE: this wrapper deliberately takes no `data` prop. Svelte Flow hands each
+    // custom node the very `data` object it holds in the `nodesData` store, so the
+    // node components edit that payload in place (by reference) and `toObject()`
+    // picks the edits up on save. Nothing needs to be forwarded back up from here.
 
     // Rest props to silence warnings
     $$restProps;
@@ -45,12 +48,6 @@
             isExpanded = !isExpanded;
         }
     }
-
-    // Reactive statement to update nodes when data changes
-    $: if (data) {
-        dispatch('updateNodeData', { id: data.id, data: data.data });
-    }
-
 
     function getHandlePosition(handle: HandleConfig): string {
         const offsetX = handle.offsetX ?? 0;

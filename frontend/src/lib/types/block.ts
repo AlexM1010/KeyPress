@@ -35,7 +35,6 @@ export type BlockData = {
     v: Nullish<string>;
   }[];
   invalid?: boolean;
-  colorStore?: string; // Add this if needed by ColorPickerNode
 };
 
 export type BlockNode = Node<BlockData>;

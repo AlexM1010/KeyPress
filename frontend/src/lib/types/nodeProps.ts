@@ -1,5 +1,4 @@
 // src/lib/types/nodeProps.ts
-import type { Writable } from 'svelte/store';
 import type { Node } from '@xyflow/svelte';
 import type { BlockData } from './block'; // Adjust the path as necessary
 import type { TVariant } from './tailwind'; // Adjust the path as necessary
@@ -25,5 +24,4 @@ export interface BaseNodeProps {
   draggable?: boolean;
   parentId?: string;
   // ... add other props as needed
-  colorStore?: Writable<string>; // ColorPickerNode
 }

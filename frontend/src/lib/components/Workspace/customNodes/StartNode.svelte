@@ -9,7 +9,7 @@
     import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
     import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
-    import type { HandleConfig } from './types';
+    import type { HandleConfig, StartNodeData } from '$lib/stores/flow';
     import '$lib/index.scss';
 
     // Type definitions for OS-specific key mappings
@@ -51,8 +51,25 @@
     export let highlightColor: string = 'bg-blue-500';
     export let isConnectable: boolean = true;
 
+    const DEFAULT_DATA: StartNodeData = {
+        macroKeys: []
+    };
+
+    // Svelte Flow passes the node's data payload here, not the whole node - and it
+    // is the *same object* the flow store holds, so every edit below lands in the
+    // store by reference and is picked up by `toObject()` on save. The recorded
+    // macro therefore has to live on `data`, never in a local `let`.
+    export let data: StartNodeData = { ...DEFAULT_DATA };
+
+    // Persisted nodes can predate newer fields, so backfill whatever is missing
+    // without clobbering saved values. This has to mutate `data` in place:
+    // reassigning it (`data = { ...DEFAULT_DATA, ...data }`) would detach this
+    // component from the store's object and silently discard every later edit.
+    // It also runs exactly once, so a saved macro is never overwritten by the
+    // empty default the way a reactive statement would overwrite it.
+    Object.assign(data, { ...DEFAULT_DATA, ...data });
+
     // Component state
-    let macroKeys: string[] = [];
     let isRecording: boolean = false;
     let osDetectionFailed: boolean = false;
     let currentOS: OperatingSystem;
@@ -94,7 +111,7 @@
 
     // Macro recording functions
     function startRecording() {
-        macroKeys = Array.from(selectedSpecialKeys);
+        data.macroKeys = Array.from(selectedSpecialKeys);
         isRecording = true;
     }
 
@@ -111,8 +128,10 @@
         event.preventDefault();
 
         const key = event.key;
-        if (!macroKeys.includes(key)) {
-            macroKeys = [...macroKeys, key];
+        if (!data.macroKeys.includes(key)) {
+            // Assigning the property (rather than pushing) keeps Svelte's
+            // reactivity while still writing through to the store's object.
+            data.macroKeys = [...data.macroKeys, key];
         }
     }
 
@@ -140,7 +159,7 @@
     });
 
     // Reactive declarations
-    $: macroDisplay = macroKeys.join('+');
+    $: macroDisplay = data.macroKeys.join('+');
 
     $$restProps
 </script>
@@ -153,8 +172,7 @@
     {isConnectable}
     id={id}
     type="StartNode"
-    data={{ macroKeys, isRecording, currentOS }} 
-    on:duplicate={handleDuplicate} 
+    on:duplicate={handleDuplicate}
     on:delete={handleDelete}
 >
     <div class="space-y-4" transition:slide|local={{duration: 300, easing: cubicOut}}>
@@ -209,7 +227,7 @@
                     class="px-3 py-2 bg-[--main-hover] bg-opacity-50 rounded-md shadow-sm transition-all duration-200"
                     in:fade={{duration: 200}}
                 >
-                    {macroKeys.length ? macroDisplay : 'No macro'}
+                    {data.macroKeys.length ? macroDisplay : 'No macro'}
                 </span>
             </div>
         </div>

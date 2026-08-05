@@ -23,35 +23,26 @@
     const BUTTON_TYPES: ButtonType[] = ['left', 'middle', 'right'];
     const SCROLL_DIRECTIONS: ScrollDirection[] = ['Vertical', 'Horizontal'];
 
-    export let data: MouseClickNodeData = {
-        id: '',
-        type: 'MouseClickNode',
-        position: { x: 0, y: 0 },
-        data: {
-            buttonType: 'left',
-            numberOfClicks: 1,
-            clickDelay: 0.1,
-            pressReleaseDelay: 100,
-            releaseAfterPress: true,
-            scrollDirection: ['Vertical'],
-            scrollLines: 0
-        }
+    const DEFAULT_DATA: MouseClickNodeData = {
+        buttonType: 'left',
+        numberOfClicks: 1,
+        clickDelay: 0.1,
+        pressReleaseDelay: 100,
+        releaseAfterPress: true,
+        scrollDirection: ['Vertical'],
+        scrollLines: 0
     };
 
-    // Update all data references to use data.data
-    $: {
-        if (!data.data) {
-            data.data = {
-                buttonType: 'left',
-                numberOfClicks: 1,
-                clickDelay: 0.1,
-                pressReleaseDelay: 100,
-                releaseAfterPress: true,
-                scrollDirection: ['Vertical'],
-                scrollLines: 0
-            };
-        }
-    }
+    // Svelte Flow passes the node's data payload here, not the whole node - and it
+    // is the *same object* the flow store holds, so every edit below lands in the
+    // store by reference and is picked up by `toObject()` on save.
+    export let data: MouseClickNodeData = { ...DEFAULT_DATA };
+
+    // Persisted nodes can predate newer fields, so backfill whatever is missing
+    // without clobbering saved values. This has to mutate `data` in place:
+    // reassigning it (`data = { ...DEFAULT_DATA, ...data }`) would detach this
+    // component from the store's object and silently discard every later edit.
+    Object.assign(data, { ...DEFAULT_DATA, ...data });
 
     let showAdvanced = false;
 
@@ -71,16 +62,16 @@
     }
 
     function toggleDirection(direction: ScrollDirection): void {
-        data.data.scrollDirection = data.data.scrollDirection ?? [];
-        if (data.data.scrollDirection.includes(direction)) {
-            data.data.scrollDirection = data.data.scrollDirection.filter(d => d !== direction);
+        data.scrollDirection = data.scrollDirection ?? [];
+        if (data.scrollDirection.includes(direction)) {
+            data.scrollDirection = data.scrollDirection.filter(d => d !== direction);
         } else {
-            data.data.scrollDirection.push(direction);
+            data.scrollDirection.push(direction);
         }
     }
 
     function updateButtonType(newType: ButtonType): void {
-        data.data.buttonType = newType;
+        data.buttonType = newType;
     }
 
     function toggleAdvancedOptions(): void {
@@ -90,6 +81,11 @@
     function handleClick(type: ButtonType): void {
         updateButtonType(type);
     }
+
+    // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
+    // positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
+    // the "created with unknown prop" warnings for the ones we don't declare.
+    $$restProps;
 </script>
 
 <NodeWrapper
@@ -99,7 +95,6 @@
     {color}
     type="Click"
     handles={NODE_HANDLES}
-    bind:data
     on:duplicate={handleDuplicate}
     on:delete={handleDelete}
 >
@@ -110,7 +105,7 @@
                 <ButtonGroupItem 
                     value={type}
                     on:click={() => handleClick(type)}
-                    active={data.data.buttonType === type}
+                    active={data.buttonType === type}
                     itemHighlightColor={highlightColor}
                 >
                     {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -123,14 +118,14 @@
             <div class="flex justify-between items-center gap-2">
                 <NumberInput
                     label="Clicks"
-                    bind:value={data.data.numberOfClicks}
+                    bind:value={data.numberOfClicks}
                     minValue={0} 
                     maxValue={1000}
                 />
-                {#if data?.data.numberOfClicks > 1}
+                {#if data?.numberOfClicks > 1}
                     <TimeInput 
                         label="delay" 
-                        bind:value={data.data.clickDelay}
+                        bind:value={data.clickDelay}
                         defaultValue={0.1}
                         highlightColor={highlightColor}
                     />
@@ -140,13 +135,13 @@
             <div class="flex justify-between items-center gap-2">
                 <Checkbox
                     label="Release"
-                    bind:checked={data.data.releaseAfterPress}
+                    bind:checked={data.releaseAfterPress}
                     highlightColor={highlightColor}
                 />
-                {#if data?.data.releaseAfterPress}
+                {#if data?.releaseAfterPress}
                     <TimeInput 
                         label="after" 
-                        bind:value={data.data.pressReleaseDelay}
+                        bind:value={data.pressReleaseDelay}
                         defaultValue={0.1}
                         highlightColor={highlightColor}
                     />
@@ -175,7 +170,7 @@
                             <ButtonGroupItem 
                                 value={direction}
                                 on:click={() => toggleDirection(direction)}
-                                active={data.data.scrollDirection.includes(direction)}
+                                active={data.scrollDirection.includes(direction)}
                                 itemHighlightColor={highlightColor}
                             >
                                 {direction}
@@ -185,7 +180,7 @@
                     
                     <NumberInput
                         label="Lines"
-                        bind:value={data.data.scrollLines}
+                        bind:value={data.scrollLines}
                         minValue={-100000}
                         maxValue={100000}
                     />

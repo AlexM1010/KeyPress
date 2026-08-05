@@ -15,17 +15,23 @@
     export let color: string = 'bg-gradient-to-r from-blue-500 to-blue-600';
     export let highlightColor: string = 'bg-blue-500';
 
-    export let data: DelayNodeData = {
-        id: '',
-        type: 'DelayNode',
-        position: { x: 0, y: 0 },
-        data: {
-            delayType: 'Fixed',
-            time: 1000,
-            minTime: 500,
-            maxTime: 1500
-        }
+    const DEFAULT_DATA: DelayNodeData = {
+        delayType: 'Fixed',
+        time: 1000,
+        minTime: 500,
+        maxTime: 1500
     };
+
+    // Svelte Flow passes the node's data payload here, not the whole node - and it
+    // is the *same object* the flow store holds, so every edit below lands in the
+    // store by reference and is picked up by `toObject()` on save.
+    export let data: DelayNodeData = { ...DEFAULT_DATA };
+
+    // Persisted nodes can predate newer fields, so backfill whatever is missing
+    // without clobbering saved values. This has to mutate `data` in place:
+    // reassigning it (`data = { ...DEFAULT_DATA, ...data }`) would detach this
+    // component from the store's object and silently discard every later edit.
+    Object.assign(data, { ...DEFAULT_DATA, ...data });
 
     const handles: HandleConfig[] = [
         { id: "right", type: "source", position: Position.Right, offsetY: 50 },
@@ -35,19 +41,13 @@
     const DELAY_TYPES = ['Fixed', 'Random'];
 
     function updateDelayType(newType: string) {
-        data.data.delayType = newType as 'Fixed' | 'Random';
+        data.delayType = newType as 'Fixed' | 'Random';
     }
 
-    $: {
-        if (!data.data) {
-            data.data = {
-                delayType: 'Fixed',
-                time: 1000,
-                minTime: 500,
-                maxTime: 1500
-            };
-        }
-    }
+    // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
+    // positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
+    // the "created with unknown prop" warnings for the ones we don't declare.
+    $$restProps;
 </script>
 
 <NodeWrapper
@@ -57,7 +57,6 @@
     {color}
     type="Delay"
     {handles}
-    bind:data
     on:duplicate
     on:delete
 >
@@ -68,7 +67,7 @@
                 <ButtonGroupItem 
                     value={type}
                     on:click={() => updateDelayType(type)}
-                    active={data.data.delayType === type}
+                    active={data.delayType === type}
                     itemHighlightColor={highlightColor}
                 >
                     {type}
@@ -77,20 +76,20 @@
         </ButtonGroup>
 
         <!-- Fixed Delay Input -->
-        {#if data.data.delayType === 'Fixed'}
+        {#if data.delayType === 'Fixed'}
             <TimeInput
                 label="Time"
-                bind:value={data.data.time}
+                bind:value={data.time}
                 defaultValue={1000}
                 startingUnit="ms"
                 minValue={0}
                 highlightColor={highlightColor}
             />
         <!-- Random Delay Inputs -->
-        {:else if data.data.delayType === 'Random'}
+        {:else if data.delayType === 'Random'}
             <TimeInput
                 label="Minimum Time"
-                bind:value={data.data.minTime}
+                bind:value={data.minTime}
                 defaultValue={500}
                 startingUnit="ms"
                 minValue={0}
@@ -98,7 +97,7 @@
             />
             <TimeInput
                 label="Maximum Time"
-                bind:value={data.data.maxTime}
+                bind:value={data.maxTime}
                 defaultValue={1500}
                 startingUnit="ms"
                 minValue={0}

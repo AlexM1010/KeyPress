@@ -19,12 +19,13 @@
     type PathType = 'Straight' | 'Human';
     type SpeedType = 'Instant' | 'Human';
 
-    interface Coordinates {
+    type Coordinates = {
         x: number;
         y: number;
-    }
+    };
 
-    interface MouseMoveTaskData {
+    // The node's data payload - this is what Svelte Flow hands to the `data` prop.
+    type MouseMoveTaskData = {
         startPosition: {
             type: PositionType;
             coordinates: Coordinates;
@@ -42,9 +43,13 @@
         };
         pathType: PathType;
         customPath: Coordinates[];
-    }
+    };
 
-    // Props
+    // Props.
+    // `data` is the very object the flow store holds for this node, so the edits
+    // below (and the backfill further down) mutate it in place and are picked up by
+    // `toObject()` on save. Never reassign `data` - that detaches the component
+    // from the store and silently drops every edit.
     export let id: string;
     export let title: string = 'Mouse Move';
     export let icon: ComponentType = Mouse;
@@ -135,6 +140,11 @@
     function handleDelete(): void {
         console.log("Delete action triggered", JSON.stringify(data));
     }
+
+    // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
+    // positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
+    // the "created with unknown prop" warnings for the ones we don't declare.
+    $$restProps;
 </script>
 
 <NodeWrapper
@@ -144,7 +154,6 @@
     {color}
     type="Move"
     {handles}
-    bind:data
     on:duplicate={handleDuplicate}
     on:delete={handleDelete}
 >
