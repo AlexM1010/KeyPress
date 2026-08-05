@@ -22,6 +22,18 @@
   import { fade } from "svelte/transition";
 
   // Types and Interfaces
+  /**
+   * The slice of an edge's `data` payload this component understands.
+   *
+   * `defaultEdgeOptions` in Flow.svelte stamps `{ color: 'var(--main-text)' }`
+   * onto every edge, so this is how an edge says what colour it should be
+   * drawn in. Read-only here: the payload is the very object held in the edges
+   * store, so it must never be reassigned.
+   */
+  interface CustomEdgeData {
+    color?: string;
+  }
+
   interface HoverPoint {
     x: number;
     y: number;
@@ -60,6 +72,22 @@
     },
   } as const;
 
+  /**
+   * Colour used when an edge carries no `data.color` of its own - for instance
+   * an edge restored from a save written before edges had a data payload.
+   * `--main-text` is white on the dark theme and black on the light one, so the
+   * line stays legible either way.
+   *
+   * Svelte Flow's own default is `--xy-edge-stroke-default`, which on the dark
+   * theme is #3e3e3e: all but invisible against this app's near-black canvas.
+   * Leaving the stroke unset is what made edges look like they were not
+   * rendering at all.
+   */
+  const DEFAULT_EDGE_COLOR = "var(--main-text)";
+
+  /** Stroke width, in SVG user units, of the visible edge line. */
+  const EDGE_STROKE_WIDTH = 2;
+
   // Props
   type $$Props = EdgeProps;
 
@@ -71,6 +99,8 @@
   export let targetY: $$Props["targetY"];
   export let targetPosition: $$Props["targetPosition"];
   export let style: $$Props["style"] = undefined;
+  export let interactionWidth: $$Props["interactionWidth"] = undefined;
+  export let data: CustomEdgeData | undefined = undefined;
 
   // State
   let edgePath: string;
@@ -90,6 +120,20 @@
     targetY,
     targetPosition,
   });
+
+  /**
+   * Colour and width are handed to `BaseEdge` as Svelte Flow's own custom
+   * properties rather than as a plain `stroke:` declaration. Its stylesheet
+   * already reads them (`stroke: var(--xy-edge-stroke, ...)`), and going
+   * through the variable keeps the `.selected` rule - which sets `stroke`
+   * directly - able to win, which an inline `stroke` could not.
+   *
+   * Any `style` the edge itself carries is appended last so it still overrides.
+   */
+  $: edgeStyle =
+    `--xy-edge-stroke: ${data?.color ?? DEFAULT_EDGE_COLOR};` +
+    ` --xy-edge-stroke-width: ${EDGE_STROKE_WIDTH};` +
+    (style ? ` ${style}` : "");
 
   const edges = useEdges();
 
@@ -303,7 +347,7 @@
     stroke-width="10"
     style="pointer-events: stroke;"
   />
-  <BaseEdge path={edgePath}  {style} /> <!-- {markerEnd} -->
+  <BaseEdge path={edgePath} style={edgeStyle} {interactionWidth} /> <!-- {markerEnd} -->
 </g>
 
 <!-- Hover points with delete buttons -->

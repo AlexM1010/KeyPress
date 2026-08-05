@@ -7,11 +7,9 @@ import {
 } from "@xyflow/svelte";
 import "@xyflow/svelte/dist/style.css";
 import { get } from "svelte/store";
-import { nodesData, edgesData, type NodeData } from "$lib/stores/flow";
+import { nodesData, edgesData, type FlowNode } from "$lib/stores/flow";
 
 // Auto rearrange constants
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
 const nodeWidth = 172;
 const nodeHeight = 36;
 
@@ -22,6 +20,12 @@ function getLayoutedElements(
     direction = "TB",
 ) {
     const isHorizontal = direction === "LR";
+
+    // A fresh graph per run. A module-level graph is never emptied, so nodes
+    // and edges from earlier layouts pile up in it and keep reserving rank and
+    // spacing for nodes the user has since deleted.
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
     dagreGraph.setGraph({ rankdir: direction });
 
     nodes.forEach((node) => {
@@ -60,7 +64,7 @@ function onLayout(direction: string) {
     const nodesValue = get(nodesData) as Node[];
     const edgesValue = get(edgesData);
     const layoutedElements = getLayoutedElements(nodesValue, edgesValue, direction);
-    nodesData.set(layoutedElements.nodes as NodeData[]);
+    nodesData.set(layoutedElements.nodes as FlowNode[]);
     edgesData.set(layoutedElements.edges);
 }
 

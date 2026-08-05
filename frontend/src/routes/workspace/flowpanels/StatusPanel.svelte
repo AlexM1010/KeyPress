@@ -2,7 +2,18 @@
   import { Check, X, Play, TriangleAlert } from "lucide-svelte";
   import { isExpanded } from '$lib/stores/navbar';
   export let isStatusPanelExpanded;
-  export let statusMessages;
+  /**
+   * `message` is already user-facing text - nodes are named the way the canvas
+   * names them ("Delay 2 completed successfully."), never by their raw id.
+   * `nodeId` carries that id separately for the messages that have one, so it
+   * stays reachable for debugging without cluttering the panel.
+   */
+  export let statusMessages: {
+    id: string;
+    type: string;
+    message: string;
+    nodeId?: string;
+  }[];
   export let executionStatus;
   $: expandedClass = $isExpanded ? 'expanded' : '';
 </script>
@@ -36,7 +47,10 @@
                 class="flow-icon text-blue-500 mr-2 {msg.type === 'running' ? 'animate-pulse' : ''}"
               />
             {/if}
-            <span class="text-sm">{msg.message}</span>
+            <span
+              class="text-sm"
+              title={msg.nodeId ? `Node id: ${msg.nodeId}` : undefined}
+            >{msg.message}</span>
           </li>
         {/each}
       </ul>

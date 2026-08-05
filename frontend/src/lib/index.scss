@@ -55,6 +55,18 @@ html { font-family: "Inter", "system-ui"; }
 	--error-color-light: #dc2626; /* red-600 */
     --error-color-dark: #f87171; /* red-400 */
 
+	/* Nodes a run left out because nothing connects them to the Start node.
+	   Two tones per theme: the solid one draws the ring that says exactly which
+	   card is marked, the translucent one is the glow that makes it findable at
+	   a glance. Picked per theme rather than shared so the mark keeps its
+	   contrast on both the near-black and the light-grey canvas: orange-400 is
+	   washed out on white, orange-600 is muddy on black. */
+	--skipped-glow-light: #ea580c; /* orange-600 */
+	--skipped-glow-soft-light: rgba(234, 88, 12, 0.45);
+
+	--skipped-glow-dark: #fb923c; /* orange-400 */
+	--skipped-glow-soft-dark: rgba(251, 146, 60, 0.55);
+
 	--dark-0-60: rgba(0, 0, 0, 0.6);
 	--light-0-60: rgba(255, 255, 255, 0.6);
 
@@ -114,6 +126,9 @@ body {
 
 	--keypress-1: var(--keypress-1-dark);
 	--keypress-1-text: var(--light-0);
+
+	--skipped-glow: var(--skipped-glow-dark);
+	--skipped-glow-soft: var(--skipped-glow-soft-dark);
 }
 
 :root[data-theme='light'] {
@@ -153,6 +168,9 @@ body {
 
 	--keypress-1: var(--keypress-1-light);
 	--keypress-1-text: var(--light-0);
+
+	--skipped-glow: var(--skipped-glow-light);
+	--skipped-glow-soft: var(--skipped-glow-soft-light);
 }
 
 .container {

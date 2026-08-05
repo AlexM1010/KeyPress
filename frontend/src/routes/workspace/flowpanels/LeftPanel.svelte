@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { Plus, Play } from "lucide-svelte";
+  import { Plus, Play, Palette, Keyboard } from "lucide-svelte";
   import { isExpanded } from '$lib/stores/navbar';
-  import MouseClickNode from '$lib/components/customNodes/MouseClickNode.svelte';
-  import MouseMoveNode from '$lib/components/customNodes/MouseMoveNode.svelte';
-  import StartNode from '$lib/components/customNodes/StartNode.svelte';
-  import DelayNode from '$lib/components/customNodes/DelayNode.svelte';
+  import MouseClickNode from '$lib/components/Workspace/customNodes/MouseClickNode.svelte';
+  import MouseMoveNode from '$lib/components/Workspace/customNodes/MouseMoveNode.svelte';
+  import StartNode from '$lib/components/Workspace/customNodes/StartNode.svelte';
+  import DelayNode from '$lib/components/Workspace/customNodes/DelayNode.svelte';
+  import ColorPickerNode from '$lib/components/Workspace/customNodes/ColorPickerNode.svelte';
+  import KeyPressNode from '$lib/components/Workspace/customNodes/KeyPressNode.svelte';
 
   export let availableNodes = [
     {
@@ -26,6 +28,20 @@
           id: 'delay-node',
           component: DelayNode,
           isExpanded: false,
+          data: undefined,
+        },
+        {
+          // Must be 'ColorPickerNode': that is the key in customNodes/nodeTypes.ts
+          // and the case the Go dispatcher in tasks.go matches on. Any other
+          // spelling drops a node the backend rejects as an unknown task type.
+          type: 'ColorPickerNode',
+          label: 'Wait For Color',
+          icon: Palette,
+          id: 'color-picker-node',
+          component: ColorPickerNode,
+          isExpanded: false,
+          // Left undefined like the others: the node backfills its own
+          // DEFAULT_DATA, so the palette does not duplicate the payload.
           data: undefined,
         }
       ]
@@ -49,6 +65,25 @@
           id: 'move-node',
           component: MouseMoveNode,
           isExpanded: false,
+          data: undefined,
+        }
+      ]
+    },
+    {
+      group: "Keyboard Control",
+      nodes: [
+        {
+          // Must be 'KeyPressNode': that is the key in customNodes/nodeTypes.ts
+          // and the case the Go dispatcher in tasks.go matches on. Any other
+          // spelling drops a node the backend rejects as an unknown task type.
+          type: 'KeyPressNode',
+          label: 'Keypress Node',
+          icon: Keyboard,
+          id: 'keypress-node',
+          component: KeyPressNode,
+          isExpanded: false,
+          // Left undefined like the others: the node backfills its own
+          // DEFAULT_DATA, so the palette does not duplicate the payload.
           data: undefined,
         }
       ]

@@ -27,6 +27,91 @@
     background-color: var(--tertiary-hover);
 }
 
+/* Macro name field in the workspace toolbar. The name decides which file in the
+   app data directory a save writes to, so it sits next to the save button. */
+.flow-name-input {
+    background-color: var(--tertiary);
+    color: var(--main-text);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.25rem;
+    border: 1px solid var(--border);
+    opacity: 0.8;
+    width: 11rem;
+}
+
+.flow-name-input:focus {
+    outline: 1px solid var(--border-hover);
+    opacity: 1;
+}
+
+/* A save the backend refused - an empty name, or one another macro already
+   owns. The border marks the field that has to change, the message says what
+   is wrong; both clear as soon as the name is edited. */
+.flow-name-input-invalid,
+.flow-name-input-invalid:focus {
+    border-color: var(--error);
+    outline-color: var(--error);
+    opacity: 1;
+}
+
+.flow-save-error {
+    max-width: 22rem;
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.25rem;
+    background-color: var(--tertiary);
+    border: 1px solid var(--error);
+    color: var(--error);
+    font-size: 0.8rem;
+    text-align: right;
+}
+
+/* Preview mode renders a saved macro as a static picture. Killing pointer
+   events across the whole flow is what actually makes it read-only: the
+   interaction flags on <SvelteFlow> stop panning, zooming and dragging, but the
+   inputs inside custom nodes would still be reachable and they mutate node data
+   in place. The descendant selector is deliberate - `pointer-events` is
+   inherited, but Svelte Flow's own stylesheet sets `pointer-events: all` on
+   nodes, handles and the pane, which would otherwise win over inheritance. */
+.flow-preview .svelte-flow,
+.flow-preview .svelte-flow * {
+    pointer-events: none;
+}
+
+/* Skipped-node mark.
+   ------------------
+   Nodes a run left out because nothing connects them to the Start node get an
+   orange glow so the user can see which branch did nothing, instead of having
+   to match numbered names in the status panel against the canvas.
+
+   The look lives here; the *selection* cannot, because which nodes are marked
+   is only known at runtime. Flow.svelte emits a tiny stylesheet that sets
+   `--node-skipped-glow` on the wrappers of the reported ids - see
+   `buildSkippedGlowCss` there. That indirection is the whole point of this
+   rule: nothing is ever written onto the node objects in the store, so
+   `toObject()` - and therefore every save file - is untouched.
+
+   `border-radius` only shapes the shadow: the wrapper has no background or
+   border of its own, and 1rem is the radius of the node card inside it
+   (`nodeComponents/NodeWrapper.svelte`), so the ring hugs the card. The
+   fallback keeps unmarked nodes exactly as they were.
+
+   `transition-property: none` is load-bearing, not tidying. `index.scss`
+   transitions `box-shadow` on every element (`*`), and in the Chromium the app
+   runs on, a transitioned `box-shadow` whose value comes from a custom
+   property stops being recomputed when the rule supplying that property is
+   added or removed: the glow sticks - either never appearing, or staying on
+   the canvas after the next run has cleared it. Measured directly in the
+   running app; opting this one element out fixes both directions, and costs
+   nothing, because nothing else the wrapper carries is in that transition
+   list (Svelte Flow positions it with `transform`). The mark is meant to be
+   noticed the instant a run reports it anyway. */
+.svelte-flow__node {
+    border-radius: 1rem;
+    box-shadow: var(--node-skipped-glow, none);
+    transition-property: none;
+}
+
 /* Common icon styles */
 :global(.flow-icon) {
     width: 1.25rem;
