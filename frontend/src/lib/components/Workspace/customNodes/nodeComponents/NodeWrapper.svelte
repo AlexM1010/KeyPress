@@ -3,11 +3,12 @@
     import { slide } from 'svelte/transition';
     import { ChevronDown } from "lucide-svelte";
     import type { ComponentType } from "svelte";
-    import { Handle, Position } from "@xyflow/svelte";
+    import { Handle, Position, useSvelteFlow } from "@xyflow/svelte";
     import type { HandleConfig } from "../types";
     import ContextMenu from "./ContextMenu.svelte";
     import { cubicOut } from "svelte/easing";
-    import { createEventDispatcher } from 'svelte';
+    import { onDestroy, getContext } from 'svelte';
+    import { nodesData } from "$lib/stores/flow";
     import '$lib/index.scss';
 
     // Component Props
@@ -28,19 +29,67 @@
     // Rest props to silence warnings
     $$restProps;
 
-    const dispatch = createEventDispatcher();
+    // These actions are handled here rather than dispatched upwards. `<SvelteFlow>`
+    // instantiates the custom node components itself from `nodeTypes`, so no node is
+    // a child of `Flow.svelte` and a `createEventDispatcher` event from one has no
+    // path to a listener there. This component *is* rendered inside the flow, so it
+    // can reach the same stores `<SvelteFlow>` was handed.
+    const { deleteElements } = useSvelteFlow();
+
+    // The node palette renders these same components as static drag previews. There
+    // is no node in the flow behind them, so duplicate/delete have nothing to act on
+    // and the menu is only in the way - the palette sets this context to suppress it.
+    const isPreview: boolean = getContext('nodePreview') === true;
 
     // UI State Management
     let isHovered = false;
     let isHeaderHovered = false;
 
+    // The context menu floats above the header, so the pointer momentarily leaves
+    // the header on its way to the buttons. Hiding is deferred (and cancelled when
+    // the pointer lands on the menu) so the buttons stay reachable.
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function showMenu() {
+        if (isPreview) return;
+        clearTimeout(hideTimer);
+        isHeaderHovered = true;
+    }
+
+    function hideMenu() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => (isHeaderHovered = false), 200);
+    }
+
+    onDestroy(() => clearTimeout(hideTimer));
+
     // Event Handlers
     function handleDuplicate() {
-        dispatch('duplicate', { id });
+        // Read from the store rather than `getNode`: `<SvelteFlow>` writes drag
+        // positions straight back into it, so it holds the node's current position
+        // and is already typed as a `FlowNode`.
+        const node = $nodesData.find((n) => n.id === id);
+        if (!node) return;
+
+        // `data` must be deep-copied. Every node component mutates the payload it is
+        // handed in place (that is how edits reach the store), so a shallow copy
+        // would leave the clone editing the original's nested arrays and objects.
+        $nodesData = [
+            ...$nodesData,
+            {
+                ...node,
+                id: `${Math.random()}`,
+                position: { x: node.position.x + 40, y: node.position.y + 40 },
+                data: structuredClone(node.data),
+                selected: false,
+            },
+        ];
     }
 
     function handleDelete() {
-        dispatch('delete', { id });
+        // Goes through the flow helper rather than filtering the store directly so
+        // the edges connected to this node are torn down with it.
+        deleteElements({ nodes: [{ id }] });
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -70,11 +119,11 @@
     {...$$restProps}
 >
     <!-- Slide-out Context Menu -->
-    {#if isHeaderHovered}
-    <div 
-        on:mouseenter={() => isHeaderHovered = true} 
-        on:mouseleave={() => isHeaderHovered = false} 
-        class="context-menu-wrapper"
+    {#if isHeaderHovered && !isPreview}
+    <div
+        on:mouseenter={showMenu}
+        on:mouseleave={hideMenu}
+        class="context-menu-wrapper nodrag nopan"
         role="menu"
         tabindex="0"
     >
@@ -102,8 +151,8 @@
         style="background: {color}"
         on:click={() => (isExpanded = !isExpanded)}
         on:keydown={handleKeyDown}
-        on:mouseenter={() => isHeaderHovered = true}
-        on:mouseleave={() => isHeaderHovered = false} 
+        on:mouseenter={showMenu}
+        on:mouseleave={hideMenu}
         role="button"
         tabindex="0"
     >
@@ -136,7 +185,16 @@
         background: rgba(255, 255, 255, 0.1);
         backdrop-filter: blur(10px);
         box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-        min-width: 250px;
+        /* A fixed width rather than a minimum, so every node on the canvas is the
+           same size whatever it holds. Svelte Flow lays nodes out absolutely, so
+           an auto width shrink-wraps to *max-content*: a node with a sentence of
+           help text in it takes the sentence's unwrapped length as its width and
+           ends up several times wider than its neighbours, since nothing
+           constrains it enough to wrap. 300px is a little over the widest row any
+           node currently has (the Clicks + delay pair in the Mouse Click node),
+           so pinning it here costs the existing nodes nothing and gives prose
+           somewhere to wrap. */
+        width: 300px;
         transform-origin: center center;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
@@ -145,6 +203,19 @@
     .node-wrapper:hover {
         box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
         transform: scale(1.01);
+    }
+
+    /* Context menu sits directly on top of the header. The padding-bottom is a
+       transparent bridge: it keeps the pointer inside this element while it
+       travels from the header up to the buttons, so the menu never vanishes
+       mid-journey. */
+    .context-menu-wrapper {
+        position: absolute;
+        bottom: 100%;
+        right: 0.5rem;
+        padding-bottom: 0.5rem;
+        min-width: fit-content;
+        z-index: 100;
     }
 
     /* Header styling */

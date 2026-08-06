@@ -14,35 +14,26 @@
     }
 </script>
 
-<div class="context-menu-wrapper">
-    <div class={`context-menu ${$theme ? "dark" : ""}`}>
-        <div class="button-container">
-            <button
-                on:click={handleDuplicate}
-                aria-label="Duplicate"
-                class="icon-button"
-            >
-                <Copy class="icon" />
-            </button>
-            <button
-                on:click={handleDelete}
-                aria-label="Delete"
-                class="icon-button"
-            >
-                <Trash2 class="icon" />
-            </button>
-        </div>
+<div class={`context-menu ${$theme ? "dark" : ""}`}>
+    <div class="button-container">
+        <button
+            on:click={handleDuplicate}
+            aria-label="Duplicate"
+            class="icon-button"
+        >
+            <Copy class="icon" />
+        </button>
+        <button
+            on:click={handleDelete}
+            aria-label="Delete"
+            class="icon-button"
+        >
+            <Trash2 class="icon" />
+        </button>
     </div>
 </div>
 
 <style>
-    :global().context-menu-wrapper {
-        position: absolute;
-        top: -50px;
-        right: 100px;
-        min-width: fit-content;
-    }
-
     .context-menu {
         --icon-color: #4a5568;
         --icon-hover-color: #2d3748;
@@ -50,7 +41,6 @@
         padding: 0.5rem;
         animation: slideIn 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
         min-width: fit-content;
-        position: absolute;
     }
 
     .button-container {
@@ -89,15 +79,12 @@
 
     @keyframes slideIn {
         from {
-            transform: translateY(50px);
-            z-index: -10;
-        }
-        50% {
-            z-index: 0;
+            transform: translateY(12px);
+            opacity: 0;
         }
         to {
             transform: translateY(0);
-            z-index: 100;
+            opacity: 1;
         }
     }
 </style>

@@ -53,14 +53,6 @@
         { id: "left", type: "target", position: Position.Left, offsetY: 50 },
     ];
 
-    function handleDuplicate(): void {
-        console.log("Duplicate action triggered", JSON.stringify(data));
-    }
-
-    function handleDelete(): void {
-        console.log("Delete action triggered", JSON.stringify(data));
-    }
-
     function toggleDirection(direction: ScrollDirection): void {
         data.scrollDirection = data.scrollDirection ?? [];
         if (data.scrollDirection.includes(direction)) {
@@ -95,8 +87,6 @@
     {color}
     type="Click"
     handles={NODE_HANDLES}
-    on:duplicate={handleDuplicate}
-    on:delete={handleDelete}
 >
     <div class="grid gap-6">
         <!-- Button Type Selection -->
@@ -113,9 +103,15 @@
             {/each}
         </ButtonGroup>
 
-        <!-- Click Configuration -->
+        <!-- Click Configuration.
+
+             These two rows are the widest thing any node holds, and nodes are now
+             a fixed width (`nodeComponents/NodeWrapper.svelte`) rather than one
+             that grows to fit. They fit as they are, but `flex-wrap` means a
+             longer number - or a unit swapped to `min` - drops onto a second line
+             instead of spilling out past the card. -->
         <div class="grid gap-6 auto-rows-min">
-            <div class="flex justify-between items-center gap-2">
+            <div class="flex flex-wrap justify-between items-center gap-2">
                 <NumberInput
                     label="Clicks"
                     bind:value={data.numberOfClicks}
@@ -132,7 +128,7 @@
                 {/if}
             </div>
         
-            <div class="flex justify-between items-center gap-2">
+            <div class="flex flex-wrap justify-between items-center gap-2">
                 <Checkbox
                     label="Release"
                     bind:checked={data.releaseAfterPress}

@@ -2,7 +2,7 @@
 <script lang="ts">
     import { Play } from 'lucide-svelte';
     import { Position } from '@xyflow/svelte';
-    import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { slide, fade } from 'svelte/transition';
     import { cubicOut } from 'svelte/easing';
     import NodeWrapper from './nodeComponents/NodeWrapper.svelte';
@@ -75,8 +75,6 @@
     let currentOS: OperatingSystem;
     let selectedSpecialKeys = new Set<string>();
 
-    const dispatch = createEventDispatcher();
-
     /**
      * Detects the user's operating system based on user agent
      * @returns {OperatingSystem} Detected operating system or 'windows' as fallback
@@ -91,10 +89,6 @@
     }
 
     currentOS = detectOS();
-
-    // Event handlers
-    const handleDuplicate = () => dispatch('duplicate');
-    const handleDelete = () => dispatch('delete');
 
     /**
      * Toggles a special key's selected state
@@ -172,8 +166,6 @@
     {isConnectable}
     id={id}
     type="StartNode"
-    on:duplicate={handleDuplicate}
-    on:delete={handleDelete}
 >
     <div class="space-y-4" transition:slide|local={{duration: 300, easing: cubicOut}}>
         <!-- OS Selection -->

@@ -133,14 +133,6 @@
     } as const;
 
     // Event handlers
-    function handleDuplicate(): void {
-        console.log("Duplicate action triggered", JSON.stringify(data));
-    }
-
-    function handleDelete(): void {
-        console.log("Delete action triggered", JSON.stringify(data));
-    }
-
     // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
     // positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
     // the "created with unknown prop" warnings for the ones we don't declare.
@@ -154,8 +146,6 @@
     {color}
     type="Move"
     {handles}
-    on:duplicate={handleDuplicate}
-    on:delete={handleDelete}
 >
     <div class="grid gap-6">
         <!-- Start Position Configuration -->

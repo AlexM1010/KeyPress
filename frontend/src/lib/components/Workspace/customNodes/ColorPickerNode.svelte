@@ -70,8 +70,6 @@
     {color}
     type="ColorPickerNode"
     {handles}
-    on:duplicate
-    on:delete
 >
     <!-- `nodrag` keeps Svelte Flow from turning a click on a control into a node
          drag; it is matched against the event target's ancestors, so wrapping the

@@ -57,8 +57,6 @@
     {color}
     type="Delay"
     {handles}
-    on:duplicate
-    on:delete
 >
     <div class="space-y-4">
         <!-- Delay Type Selection -->
