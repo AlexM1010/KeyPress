@@ -369,7 +369,6 @@
     overflow: hidden;
     z-index: 10;
     width: 1.5rem; /* Adjust the width if needed */
-    height: 5rem; /* Hide confusing node movement lock control */
 }
 
 .svelte-flow__controls button {

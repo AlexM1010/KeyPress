@@ -1318,10 +1318,11 @@
               {/if}
             </button>
             <!-- Layout Button. `onLayout` rearranges the workspace stores
-                 directly. -->
+                 directly, left-to-right - the direction the nodes' own handles
+                 point. -->
             <button
               class="flow-button"
-              on:click={() => onLayout("TB")}
+              on:click={() => onLayout("LR")}
             >
               <LayoutDashboard class="flow-icon" />
               <span>Layout</span>
@@ -1337,7 +1338,7 @@
         </div>
       </Panel>
       <!-- Flow Controls -->
-      <Controls />
+      <Controls showLock={false} />
       <MiniMap />
       <Background />
     </SvelteFlow>

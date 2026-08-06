@@ -1,7 +1,6 @@
 // flow Utils
 import dagre from "@dagrejs/dagre";
 import {
-    Position,
     type Node,
     type Edge,
 } from "@xyflow/svelte";
@@ -9,62 +8,212 @@ import "@xyflow/svelte/dist/style.css";
 import { get } from "svelte/store";
 import { nodesData, edgesData, type FlowNode } from "$lib/stores/flow";
 
-// Auto rearrange constants
-const nodeWidth = 172;
-const nodeHeight = 36;
+/**
+ * Size to reserve for a node whose real size cannot be read yet - one that has
+ * just been dropped and not laid out by the browser, or a graph laid out before
+ * the canvas has mounted.
+ *
+ * The width matches the `300px` every node is pinned to in `NodeWrapper`. The
+ * height is a deliberate over-estimate of an expanded node: reserving too much
+ * space leaves a gap, reserving too little overlaps the neighbour, so the
+ * fallback errs upwards.
+ */
+const FALLBACK_NODE_WIDTH = 300;
+const FALLBACK_NODE_HEIGHT = 260;
+
+/**
+ * Gaps dagre leaves around each node, in canvas units.
+ *
+ * `ranksep` runs along the flow (so, horizontally for `LR`) and has to clear
+ * the edge's delete button, which sits at the midpoint between two nodes.
+ * `nodesep` separates siblings across the flow.
+ */
+const RANK_SEPARATION = 140;
+const NODE_SEPARATION = 80;
+const GRAPH_MARGIN = 48;
+
+/**
+ * The size a node actually occupies on the canvas.
+ *
+ * Svelte Flow measures every rendered node and writes the result back onto the
+ * very object held in `nodesData` (`measured`), so that is the first and best
+ * source. It is absent until the node has been through a render, hence the two
+ * fallbacks: the node's own DOM box - `offsetWidth`/`offsetHeight`, which are
+ * layout sizes and so unaffected by the canvas zoom transform or the hover
+ * `scale()` - and finally the constants above.
+ *
+ * Getting this right is the whole game: dagre packs nodes to the size it is
+ * told, so a size smaller than reality is not a loose layout, it is an
+ * overlapping one.
+ */
+function getNodeSize(node: Node): { width: number; height: number } {
+    const measured = node.measured;
+    if (measured?.width && measured?.height) {
+        return { width: measured.width, height: measured.height };
+    }
+
+    if (typeof document !== "undefined") {
+        const el = document.querySelector<HTMLElement>(
+            `.svelte-flow__node[data-id="${CSS.escape(node.id)}"]`,
+        );
+        if (el?.offsetWidth && el?.offsetHeight) {
+            return { width: el.offsetWidth, height: el.offsetHeight };
+        }
+    }
+
+    return {
+        width: node.width ?? FALLBACK_NODE_WIDTH,
+        height: node.height ?? FALLBACK_NODE_HEIGHT,
+    };
+}
 
 // Auto rearrange functions
 function getLayoutedElements(
     nodes: Node[],
     edges: Edge[],
-    direction = "TB",
+    direction = "LR",
 ) {
-    const isHorizontal = direction === "LR";
-
     // A fresh graph per run. A module-level graph is never emptied, so nodes
     // and edges from earlier layouts pile up in it and keep reserving rank and
     // spacing for nodes the user has since deleted.
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    dagreGraph.setGraph({ rankdir: direction });
+    dagreGraph.setGraph({
+        rankdir: direction,
+        ranksep: RANK_SEPARATION,
+        nodesep: NODE_SEPARATION,
+        // Keeps parallel edges between the same pair of nodes from being drawn
+        // on top of each other.
+        edgesep: 32,
+        marginx: GRAPH_MARGIN,
+        marginy: GRAPH_MARGIN,
+        // Straightens long chains, which is what a macro mostly is: a run of
+        // steps that should sit on one line rather than zig-zag.
+        ranker: "network-simplex",
+        align: "UL",
+    });
+
+    const sizes = new Map<string, { width: number; height: number }>();
 
     nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, {
-            width: nodeWidth,
-            height: nodeHeight,
-        });
+        const size = getNodeSize(node);
+        sizes.set(node.id, size);
+        dagreGraph.setNode(node.id, size);
     });
 
     edges.forEach((edge) => {
-        dagreGraph.setEdge(edge.source, edge.target);
+        // An edge left over from a deleted node would make dagre lay out a
+        // phantom, pushing real nodes aside to make room for nothing.
+        if (dagreGraph.hasNode(edge.source) && dagreGraph.hasNode(edge.target)) {
+            dagreGraph.setEdge(edge.source, edge.target);
+        }
     });
 
     dagre.layout(dagreGraph);
 
-    nodes.forEach((node) => {
-        const nodeWithPosition = dagreGraph.node(node.id);
-        node.targetPosition = isHorizontal ? Position.Left : Position.Top;
-        node.sourcePosition = isHorizontal
-            ? Position.Right
-            : Position.Bottom;
+    // New node objects rather than mutation, so the store assignment below is a
+    // real change to Svelte Flow. `data` is passed through by reference on
+    // purpose: custom node components edit the payload they were handed in
+    // place, and copying it here would cut those edits off from the store.
+    const layoutedNodes = nodes.map((node) => {
+        const positioned = dagreGraph.node(node.id);
+        if (!positioned) return node;
 
-        // We are shifting the dagre node position (anchor=center center) to the top left
-        // so it matches the React Flow node anchor point (top left).
-        node.position = {
-            x: nodeWithPosition.x - nodeWidth / 2,
-            y: nodeWithPosition.y - nodeHeight / 2,
+        const size = sizes.get(node.id) ?? {
+            width: FALLBACK_NODE_WIDTH,
+            height: FALLBACK_NODE_HEIGHT,
+        };
+
+        return {
+            ...node,
+            // Dagre anchors a node at its centre, Svelte Flow at its top-left.
+            // This has to subtract *that node's* half-size, not a shared
+            // constant, or nodes of differing heights end up misaligned
+            // against the edges drawn between them.
+            position: {
+                x: positioned.x - size.width / 2,
+                y: positioned.y - size.height / 2,
+            },
         };
     });
 
-    return { nodes, edges };
+    return { nodes: layoutedNodes, edges };
 }
 
+/**
+ * Stacks the nodes that take no part in the graph in a column clear of it.
+ *
+ * Left to dagre these become their own components, which it lays out one under
+ * the other - so a handful of stray nodes push the macro itself far up the
+ * canvas and out of view. Placing them in a column to the right of everything
+ * else keeps the flow the user actually cares about where they left it.
+ */
+function placeIsolatedNodes(laidOut: Node[], isolated: Node[]): Node[] {
+    if (isolated.length === 0) return [];
 
-function onLayout(direction: string) {
+    let columnX = GRAPH_MARGIN;
+    let y = GRAPH_MARGIN;
+
+    if (laidOut.length > 0) {
+        let right = -Infinity;
+        let top = Infinity;
+        laidOut.forEach((node) => {
+            const { width } = getNodeSize(node);
+            right = Math.max(right, node.position.x + width);
+            top = Math.min(top, node.position.y);
+        });
+        columnX = right + RANK_SEPARATION;
+        y = top;
+    }
+
+    return isolated.map((node) => {
+        const positioned = { ...node, position: { x: columnX, y } };
+        y += getNodeSize(node).height + NODE_SEPARATION;
+        return positioned;
+    });
+}
+
+/**
+ * Rearranges the workspace graph in place.
+ *
+ * Defaults to `LR`. Every node declares a `left` target handle and a `right`
+ * source handle, so a left-to-right rank order is the one where an edge leaves
+ * one node's right edge and arrives at the next node's left edge; `TB` puts
+ * connected nodes above one another with their edges looping around the sides.
+ *
+ * Only the connected nodes are handed to dagre; the rest are parked beside the
+ * result by `placeIsolatedNodes`.
+ */
+function onLayout(direction: string = "LR") {
     const nodesValue = get(nodesData) as Node[];
     const edgesValue = get(edgesData);
-    const layoutedElements = getLayoutedElements(nodesValue, edgesValue, direction);
-    nodesData.set(layoutedElements.nodes as FlowNode[]);
+
+    const nodeIds = new Set(nodesValue.map((node) => node.id));
+    // An edge whose endpoints are not both on the canvas connects nothing, and
+    // is dropped by `getLayoutedElements` too.
+    const connectedIds = new Set<string>();
+    edgesValue.forEach((edge) => {
+        if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+            connectedIds.add(edge.source);
+            connectedIds.add(edge.target);
+        }
+    });
+
+    const connected = nodesValue.filter((node) => connectedIds.has(node.id));
+    const isolated = nodesValue.filter((node) => !connectedIds.has(node.id));
+
+    const layoutedElements = getLayoutedElements(connected, edgesValue, direction);
+    const placed = new Map<string, Node>();
+    layoutedElements.nodes.forEach((node) => placed.set(node.id, node));
+    placeIsolatedNodes(layoutedElements.nodes, isolated).forEach((node) =>
+        placed.set(node.id, node),
+    );
+
+    // Rebuilt in the store's own order: Svelte Flow paints nodes in array
+    // order, so reordering them here would silently restack the canvas.
+    const nextNodes = nodesValue.map((node) => placed.get(node.id) ?? node);
+
+    nodesData.set(nextNodes as FlowNode[]);
     edgesData.set(layoutedElements.edges);
 }
 
