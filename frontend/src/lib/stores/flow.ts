@@ -128,9 +128,109 @@ export const macroName: Writable<string> = writable('');
 export const macroID: Writable<string> = writable('');
 
 /**
+ * Whether the macro on screen differs from the one on disk.
+ *
+ * Driven by the workspace, which is the only place a graph can be edited, and
+ * read by anything that is about to cost the user those edits - the macro list
+ * before it opens something else over them. It keeps its last value after the
+ * workspace unmounts, which is correct: nothing outside the workspace edits the
+ * graph, so the answer cannot go stale while the user is elsewhere.
+ */
+export const isMacroDirty: Writable<boolean> = writable(false);
+
+/**
+ * The macro exactly as it was last written to (or read from) disk, serialised -
+ * `null` when no baseline has been taken yet.
+ *
+ * A module-level value rather than component state, because the workspace is a
+ * route: a trip to the macro list and back remounts it, and a baseline held in
+ * the component would be retaken on the way back and quietly declare the user's
+ * unsaved edits saved.
+ */
+let savedSnapshot: string | null = null;
+
+export const getSavedSnapshot = (): string | null => savedSnapshot;
+
+/**
+ * Adopts `snapshot` as the state on disk, which makes the macro clean until the
+ * next edit. Called after a save, and once the graph a load put on the canvas
+ * has settled - see `serializeMacro`.
+ */
+export function markMacroSaved(snapshot: string): void {
+	savedSnapshot = snapshot;
+	isMacroDirty.set(false);
+}
+
+/** The subset of a node that reaches the file. */
+type PersistableNode = {
+	id: string;
+	type?: string;
+	position: { x: number; y: number };
+	data?: unknown;
+};
+
+/** The subset of an edge that reaches the file. */
+type PersistableEdge = {
+	id: string;
+	source: string;
+	target: string;
+	sourceHandle?: string | null;
+	targetHandle?: string | null;
+	type?: string;
+};
+
+/**
+ * The macro as a string that changes exactly when the saved file would.
+ *
+ * Comparing two of these is how the workspace knows whether there is anything
+ * to save. Watching the stores instead would not work at all: Svelte Flow hands
+ * each node component the very `data` object the store holds and the components
+ * mutate it in place, so editing a delay changes no store reference and fires no
+ * subscription.
+ *
+ * Only the fields the Go `FlowData` keeps are included, and that is the point
+ * rather than an economy: `toObject()` also reports Svelte Flow's own bookkeeping
+ * (selection, drag state), none of which is saved, so including any of it would
+ * have clicking a node announce unsaved changes. Nodes and edges are sorted by
+ * id for the same reason - the array order is Svelte Flow's business, not the
+ * user's.
+ */
+export function serializeMacro(
+	name: string,
+	nodes: PersistableNode[],
+	edges: PersistableEdge[]
+): string {
+	const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+
+	return JSON.stringify({
+		name: name.trim(),
+		nodes: nodes
+			.slice()
+			.sort(byId)
+			.map((node) => ({
+				id: node.id,
+				type: node.type ?? '',
+				position: { x: node.position.x, y: node.position.y },
+				data: node.data ?? {}
+			})),
+		edges: edges
+			.slice()
+			.sort(byId)
+			.map((edge) => ({
+				id: edge.id,
+				source: edge.source,
+				target: edge.target,
+				sourceHandle: edge.sourceHandle ?? '',
+				targetHandle: edge.targetHandle ?? '',
+				type: edge.type ?? ''
+			}))
+	});
+}
+
+/**
  * A saved macro in the shape the Go bindings hand it back.
  *
- * Declared structurally rather than as `main.FlowData` so this module - which
+ * Declared structurally rather than as `backend.FlowData` so this module - which
  * every part of the flow imports - does not pull in the generated Wails
  * bindings. `position` is a loose number map on the Go model, hence the
  * optional coordinates.
@@ -196,6 +296,12 @@ export const markWorkspaceHydrated = (): void => {
  * name and id: a macro the user had deleted every node from would otherwise
  * come back nameless, and saving it again would be refused as a name someone
  * else owns.
+ *
+ * The macro comes in clean, but its baseline is dropped rather than taken here:
+ * the node components have not mounted yet, and they backfill their newer
+ * fields into `data` as they do, so a snapshot taken now would be of a graph
+ * that no longer exists a frame later. The workspace takes it once the canvas
+ * has settled - see `captureSavedSnapshot` in Flow.svelte.
  */
 export function openMacroInWorkspace(data: StoredFlowData): void {
 	macroName.set(data.name ?? '');
@@ -206,5 +312,7 @@ export function openMacroInWorkspace(data: StoredFlowData): void {
 		edgesData.set(data.edges ?? []);
 	}
 
+	savedSnapshot = null;
+	isMacroDirty.set(false);
 	markWorkspaceHydrated();
 }

@@ -54,6 +54,38 @@
     opacity: 1;
 }
 
+/* Unsaved-changes mark on the save button.
+   ----------------------------------------
+   A dot in the corner of the button, so the one control that fixes the problem
+   is also the one that reports it. It marks edits that are not on disk, which
+   is a standing condition rather than the outcome of the last press - hence a
+   mark alongside the icon rather than another icon in place of it. */
+.flow-save-button {
+    position: relative;
+}
+
+/* Full opacity while there is something to save: the toolbar buttons sit at 0.8
+   and the dot has to read as deliberate rather than as part of the dimming. */
+.flow-save-button-dirty {
+    opacity: 1;
+}
+
+.flow-save-dot {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.3rem;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    /* The accent, not --error: unsaved work is a state to act on, not a
+       failure. Red here would make an ordinary edit look like a broken save,
+       and the save button already turns red when one really is. */
+    background-color: var(--link);
+    /* Ringed against the button rather than the canvas, so the dot stays
+       legible whichever way the theme goes. */
+    box-shadow: 0 0 0 1px var(--tertiary);
+}
+
 .flow-save-error {
     max-width: 22rem;
     margin-top: 0.5rem;

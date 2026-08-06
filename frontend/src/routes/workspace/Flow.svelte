@@ -21,10 +21,14 @@
     isWorkspaceHydrated,
     markWorkspaceHydrated,
     openMacroInWorkspace,
+    isMacroDirty,
+    getSavedSnapshot,
+    markMacroSaved,
+    serializeMacro,
     type FlowNode,
   } from "$lib/stores/flow";
   import { onLayout } from "$lib/utils/autoLayout";
-  import { describeError } from "$lib/utils/helpers";
+  import { describeBackendError, hasGoRuntime } from "$lib/utils/helpers";
 
   // Generated Wails bindings for the Go backend
   import {
@@ -40,7 +44,7 @@
   import CustomEdge from "./CustomEdge.svelte";
   import ConnectionLine from "./ConnectionLine.svelte";
 
-  import { onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   //Flow
   import { flowTheme } from "$lib/stores/theme";
   import "$lib/index.scss";
@@ -555,6 +559,20 @@
 
   let saveState: SaveState = { status: 'idle' };
 
+  /**
+   * The name field, so a refused save can put the cursor back in the thing that
+   * has to change for the next one to work.
+   */
+  let nameInput: HTMLInputElement | undefined;
+
+  /**
+   * Longest macro name the backend will store, mirrored here so the field stops
+   * at the limit instead of letting the user type past it and be told afterwards.
+   * Must match `maxMacroNameLen` in backend/persistence.go - the backend still
+   * enforces it, this only saves the round trip.
+   */
+  const MAX_MACRO_NAME_LEN = 200;
+
   // The macro's name and id live in `$lib/stores/flow` rather than here, because
   // the macro list can now open a macro straight into the workspace and its
   // identity has to arrive with its graph. See `openMacroInWorkspace`.
@@ -565,24 +583,103 @@
     if (saveState.status === 'error') saveState = { status: 'idle' };
   }
 
+  /**
+   * How long the save button holds its tick before going back to the save
+   * glyph. The unsaved-changes dot is what carries the state afterwards.
+   */
+  const SAVE_SUCCESS_HOLD_MS = 3000;
+
+  let saveSuccessTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Serialises the macro on screen exactly as it would be written to disk, so
+   * it can be compared with the last thing that was.
+   */
+  function currentSnapshot(): string {
+    const { nodes, edges } = toObject();
+    return serializeMacro($macroName, nodes, edges);
+  }
+
+  /**
+   * Records the graph on screen as the one on disk.
+   *
+   * Deferred by a frame on purpose. Node components backfill their newer fields
+   * into the `data` object the store holds as they mount, so a graph just read
+   * off disk keeps changing for a moment after it is put on the canvas; a
+   * baseline taken before that settles would have every freshly opened macro
+   * claiming unsaved changes it does not have. `tick()` waits for Svelte Flow to
+   * mount the nodes and the frame waits for their first render.
+   */
+  async function captureSavedSnapshot() {
+    await tick();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    try {
+      markMacroSaved(currentSnapshot());
+    } catch (error) {
+      // The route can be torn down inside that frame. Losing the baseline only
+      // costs the unsaved-changes warning until the next mount takes one.
+      console.warn("Could not record the saved state of the macro:", error);
+    }
+  }
+
   async function handleSave() {
+    // Ctrl+S can fire while a save is already in flight, and the disabled
+    // button does not stop it. Two saves at once would race over which id the
+    // workspace ends up holding.
+    if (saveState.status === 'saving') return;
+
+    // The name is trimmed for the backend, so trim it here too: otherwise the
+    // field keeps spaces that are not in the saved macro, and the snapshot
+    // taken below would differ from the file the moment it is written.
+    const name = $macroName.trim();
+    $macroName = name;
+
+    // Answered here rather than by the backend, which enforces the same rule and
+    // keeps doing so. A name is the one thing the user can see is missing, the
+    // field for it is right there, and going to the backend to be told costs a
+    // round trip whose every other failure mode - not least the bindings not
+    // being there at all - would be reported in place of the plain answer.
+    if (name === '') {
+      saveState = { status: 'error', message: 'Give the macro a name before saving it.' };
+      nameInput?.focus();
+      return;
+    }
+
     try {
       saveState = { status: 'saving' };
+
       const currentFlowData = toObject();
+
+      // Serialised here rather than after the call, and that ordering is the
+      // whole point: `toObject()` shares each node's `data` object with the
+      // canvas, so a node edited while the save was in flight would otherwise
+      // be folded into the baseline and never reported unsaved again. Taken
+      // now, this string is exactly the bytes the call below sends.
+      const sentSnapshot = serializeMacro(name, currentFlowData.nodes, currentFlowData.edges);
+
       const savedID = await SaveFile(
         backend.FlowData.createFrom(currentFlowData),
-        $macroName.trim(),
+        name,
         $macroID
       );
+
       // Now editing whatever we just wrote: saving again overwrites it instead
       // of colliding with it, and a rename lands on the new file.
       $macroID = savedID;
+      markMacroSaved(sentSnapshot);
+
       saveState = { status: 'success' };
-      setTimeout(() => {
+      clearTimeout(saveSuccessTimer);
+      saveSuccessTimer = setTimeout(() => {
         if (saveState.status === 'success') saveState = { status: 'idle' };
-      }, 3000);
+      }, SAVE_SUCCESS_HOLD_MS);
     } catch (error) {
-      const errorMessage = describeError(error);
+      // `describeBackendError`, not `describeError`: a save that fails because
+      // the Go bindings are not there throws about a missing property of an
+      // object, and putting "Cannot read properties of undefined (reading
+      // 'App')" under the name field tells the user their macro's name is
+      // wrong when it is not.
+      const errorMessage = describeBackendError(error);
       // Two surfaces on purpose: the status panel is the established home for
       // backend failures, but it is collapsed by default, and a rejected save
       // the user cannot see is the bug this whole rule set exists to avoid. The
@@ -594,8 +691,36 @@
         type: "error",
         message: "Failed to save flow: " + errorMessage
       });
+      // A refused save leaves the macro exactly as unsaved as it was, and when
+      // the backend is what refused it, the name is what has to change. Not
+      // when the backend never heard the request: pointing at the name field
+      // would blame it for a failure it had no part in.
+      if (hasGoRuntime()) nameInput?.focus();
     }
   }
+
+  /**
+   * Ctrl+S / Cmd+S, the shortcut every user of an editor already has in their
+   * fingers. Bound on the window rather than the canvas so it works while the
+   * name field or a node input has focus - those are exactly the moments a save
+   * is worth reaching for.
+   */
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key !== 's' && event.key !== 'S') return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    // The browser's own "save page" would otherwise fire as well.
+    event.preventDefault();
+    handleSave();
+  }
+
+  // Written out rather than inlined in the markup so the button's tooltip and
+  // its accessible name cannot drift apart.
+  $: saveTitle =
+    saveState.status === 'saving'
+      ? "Saving..."
+      : $isMacroDirty
+        ? "Save macro (Ctrl+S) - unsaved changes"
+        : "Save macro (Ctrl+S)";
 
   // Computed property to determine if the status panel should be shown
   $: hasStatusPanel = isStatusPanelExpanded || statusMessages.length > 0;
@@ -726,13 +851,10 @@
       });
     });
 
-    window.runtime.EventsOn("save-error", (message) => {
-      addStatusMessage({
-        id: `save-error-${Date.now()}`,
-        type: "error",
-        message: message
-      });
-    });
+    // No "save-error" listener: the backend deliberately does not emit one,
+    // because `SaveFile` already rejects the bound call with the reason and
+    // `handleSave` reports it. Listening for an event nothing sends would only
+    // suggest failures are handled somewhere they are not.
   }
   
   // Load the last opened file when the component mounts
@@ -763,9 +885,43 @@
       addStatusMessage({
         id: `load-error-${Date.now()}`,
         type: "error",
-        message: "Failed to load last file: " + describeError(error)
+        message: "Failed to load last file: " + describeBackendError(error)
       });
+    } finally {
+      // Every path above settles on a graph the user has not edited - the macro
+      // that was read, or the defaults when there was none to read or reading
+      // failed - and each is the state to measure later edits against. In a
+      // `finally` because `openMacroInWorkspace` drops the baseline, so a
+      // capture racing this call could otherwise leave the macro with none at
+      // all and the unsaved-changes warning permanently silent.
+      await captureSavedSnapshot();
     }
+  }
+
+  // Unsaved changes
+  // ---------------
+  // How often the canvas is compared with the macro on disk. Polling rather
+  // than reacting to the stores is forced by the by-reference data contract at
+  // the top of this file: node components mutate the `data` object the store
+  // holds, so editing a delay changes no store reference and fires no
+  // subscription. A comparison is a `JSON.stringify` of the graph, which at the
+  // size a macro reaches is nothing, and this interval is far below the time it
+  // takes to reach for the macro list.
+  const DIRTY_POLL_MS = 500;
+
+  let dirtyPollTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Updates the unsaved-changes flag.
+   *
+   * A macro with no baseline yet is reported clean: the graph on screen is
+   * still the one that was loaded, and the baseline arrives a frame later - see
+   * `captureSavedSnapshot`. Announcing unsaved changes in that gap would put
+   * the warning on screen before the user had touched anything.
+   */
+  function refreshDirtyState() {
+    const saved = getSavedSnapshot();
+    isMacroDirty.set(saved !== null && currentSnapshot() !== saved);
   }
 
   // Initialize event listeners when the component mounts.
@@ -774,9 +930,41 @@
   // a route, so every trip to the macro list and back remounts it, and reading
   // again here would throw away both the macro the user just opened from that
   // list and any unsaved edits they had made before leaving.
+  //
+  // The unsaved-changes baseline is kept for the same reason and in the same
+  // place - the store, not this component - so it is only taken when there is
+  // none. Retaking it on every mount would have a trip to the macro list and
+  // back quietly declare the user's unsaved edits saved.
   onMount(() => {
     setupEventListeners();
-    if (!isWorkspaceHydrated()) loadLastOpenedFile();
+
+    if (!isWorkspaceHydrated()) {
+      // Takes its own baseline once the macro it reads is on the canvas.
+      loadLastOpenedFile();
+    } else if (getSavedSnapshot() === null) {
+      // Hydrated with no baseline: the macro list just opened a macro and
+      // navigated here. A baseline that survived the remount is left alone -
+      // it belongs to edits the user has not saved yet.
+      captureSavedSnapshot();
+    }
+
+    dirtyPollTimer = setInterval(refreshDirtyState, DIRTY_POLL_MS);
+  });
+
+  onDestroy(() => {
+    clearInterval(dirtyPollTimer);
+    clearTimeout(saveSuccessTimer);
+
+    // One last look, so the flag the macro list reads describes the canvas as
+    // the user left it rather than as it was up to half a second earlier.
+    // Guarded because this runs while the route is being torn down: an unsaved
+    // edit going unrecorded is worth a warning in the console, never a throw
+    // out of a destroy.
+    try {
+      refreshDirtyState();
+    } catch (error) {
+      console.warn("Could not check for unsaved changes on leaving:", error);
+    }
   });
 </script>
 
@@ -793,6 +981,10 @@
     <svelte:element this="style">{skippedGlowCss}</svelte:element>
   {/if}
 </svelte:head>
+
+<!-- Ctrl+S from anywhere in the workspace, including from inside a node's own
+     inputs - see `handleKeydown`. -->
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="flow-container flex">
   <!-- Left Panel. Kept mounted so it can slide both ways; an `{#if}` here would
@@ -839,10 +1031,12 @@
               class="flow-name-input"
               class:flow-name-input-invalid={saveState.status === 'error'}
               type="text"
+              bind:this={nameInput}
               bind:value={$macroName}
               on:input={clearSaveError}
               placeholder="Macro name"
               aria-label="Macro name"
+              maxlength={MAX_MACRO_NAME_LEN}
               aria-invalid={saveState.status === 'error'}
             />
             <!-- Run Flow Button -->
@@ -857,11 +1051,18 @@
                 style={isExecuting ? "animation: spin 1s linear infinite" : ""}
               />
             </button>
-            <!-- Save Button -->
+            <!-- Save Button. The dot marks edits that are not on disk, so the
+                 button says what pressing it is for rather than only what it
+                 did last. The title spells the same thing out, and carries the
+                 shortcut - there is nothing else on screen that would teach
+                 it. -->
             <button
-              class="flow-button"
+              class="flow-button flow-save-button"
+              class:flow-save-button-dirty={$isMacroDirty}
               on:click={handleSave}
               disabled={saveState.status === 'saving'}
+              title={saveTitle}
+              aria-label={saveTitle}
             >
               <svelte:component
                 this={
@@ -873,6 +1074,9 @@
                 class="flow-icon"
                 style={saveState.status === 'saving' ? "animation: spin 1s linear infinite" : ""}
               />
+              {#if $isMacroDirty && saveState.status !== 'saving'}
+                <span class="flow-save-dot" aria-hidden="true"></span>
+              {/if}
             </button>
             <!-- Layout Button. `onLayout` rearranges the workspace stores
                  directly. -->
