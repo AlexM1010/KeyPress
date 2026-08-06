@@ -16,7 +16,6 @@
 	import type { backend } from '$lib/wailsjs/go/models';
 	import { openMacroInWorkspace } from '$lib/stores/flow';
 	import { describeError } from '$lib/utils/helpers';
-	import { isExpanded } from '$lib/stores/navbar';
 
 	import TabTitle from '$lib/components/Projects/TabTitle.svelte';
 	import MacroCard from '$lib/components/Projects/MacroCard.svelte';
@@ -95,9 +94,6 @@
 	const isOpening = (state: OpenState, id: string): boolean =>
 		state.status === 'opening' && state.id === id;
 
-	const plural = (count: number, word: string): string =>
-		`${count} ${word}${count === 1 ? '' : 's'}`;
-
 	onMount(async () => {
 		try {
 			listState = { status: 'loaded', macros: await ListProjects() };
@@ -118,35 +114,32 @@
 
 <TabTitle title="Macros" />
 
-<!-- The navbar is fixed and can be collapsed from the workspace, and that
-     collapse persists across routes. Reserving its height only while it is
-     showing keeps the grid from starting under a bar that is not there. -->
-<div class="macros-page" class:navbar-visible={$isExpanded}>
-	<header class="macros-header">
-		<h1 class="font-[var(--title-f)] text-2xl">Saved macros</h1>
-
-		<div class="macros-search">
-			<Search class="w-4 h-4 macros-search-icon" />
-			<input
-				class="macros-search-input"
-				type="search"
-				bind:value={query}
-				placeholder="Search macros"
-				aria-label="Search macros by name"
-				autocomplete="off"
-			/>
-			{#if query}
-				<button
-					type="button"
-					class="macros-search-clear"
-					on:click={() => (query = '')}
-					aria-label="Clear search"
-				>
-					<X class="w-4 h-4" />
-				</button>
-			{/if}
-		</div>
-	</header>
+<!-- The navbar is fixed, so the grid reserves its height to avoid starting
+     underneath it. -->
+<div class="macros-page">
+	<!-- The page carries no visible heading, so the field's own label is what
+	     names it - to a screen reader and to anything else reading the page. -->
+	<div class="macros-search">
+		<Search class="w-4 h-4 macros-search-icon" />
+		<input
+			class="macros-search-input"
+			type="search"
+			bind:value={query}
+			placeholder="Search macros"
+			aria-label="Search macros by name"
+			autocomplete="off"
+		/>
+		{#if query}
+			<button
+				type="button"
+				class="macros-search-clear"
+				on:click={() => (query = '')}
+				aria-label="Clear search"
+			>
+				<X class="w-4 h-4" />
+			</button>
+		{/if}
+	</div>
 
 	{#if openState.status === 'error'}
 		<p class="macros-open-error" role="alert">
@@ -180,37 +173,24 @@
 			<p class="font-300">No saved macros yet.</p>
 			<p class="font-300 text-sm">Build a flow in the workspace, give it a name and hit save.</p>
 		</div>
+	{:else if matches.length === 0}
+		<div class="macros-placeholder text-[var(--tertiary-text)]">
+			<SquareDashed class="w-8 h-8" />
+			<p class="font-300">Nothing matches &ldquo;{query.trim()}&rdquo;.</p>
+		</div>
 	{:else}
-		<p class="macros-count font-300 text-sm text-[var(--tertiary-text)]">
-			{#if needle}
-				<!-- Spelt out rather than run through `plural`, which only knows how to
-				     bolt an "s" on and would say "matchs". -->
-				{matches.length === 1 ? '1 match' : `${matches.length} matches`} for
-				&ldquo;{query.trim()}&rdquo;
-			{:else}
-				{plural(macros.length, 'macro')}
-			{/if}
-		</p>
-
-		{#if matches.length === 0}
-			<div class="macros-placeholder text-[var(--tertiary-text)]">
-				<SquareDashed class="w-8 h-8" />
-				<p class="font-300">Nothing matches &ldquo;{query.trim()}&rdquo;.</p>
-			</div>
-		{:else}
-			<div class="macros-grid">
-				{#each matches as macro (macro.id)}
-					<MacroCard
-						name={macro.name}
-						nodeCount={macro.nodeCount}
-						edgeCount={macro.edgeCount}
-						modifiedAt={macro.modifiedAt}
-						opening={isOpening(openState, macro.id)}
-						on:click={() => openInWorkspace(macro.id)}
-					/>
-				{/each}
-			</div>
-		{/if}
+		<div class="macros-grid">
+			{#each matches as macro (macro.id)}
+				<MacroCard
+					name={macro.name}
+					nodeCount={macro.nodeCount}
+					edgeCount={macro.edgeCount}
+					modifiedAt={macro.modifiedAt}
+					opening={isOpening(openState, macro.id)}
+					on:click={() => openInWorkspace(macro.id)}
+				/>
+			{/each}
+		</div>
 	{/if}
 </div>
 
@@ -221,31 +201,19 @@
 		gap: 1rem;
 		box-sizing: border-box;
 		min-height: 100vh;
-		padding: 1.5rem 1.5rem 2.5rem;
+		/* 5rem top: 4rem navbar + the page's own 1rem of breathing room */
+		padding: 5rem 1.5rem 2.5rem;
 		color: var(--main-text);
-		// index.scss transitions every element but does not list padding, and this
-		// one moves whenever the navbar is toggled.
-		transition: padding-top 300ms ease;
-	}
-
-	.macros-page.navbar-visible {
-		padding-top: 5rem; /* 4rem navbar + the page's own 1rem of breathing room */
-	}
-
-	.macros-header {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem 1.5rem;
 	}
 
 	.macros-search {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		flex: 1 1 220px;
-		max-width: 22rem;
+		width: 66.6667%;
+		// `auto` on both sides centres it in the page's content box; the page is
+		// a flex column, so this is what stops it stretching the full width.
+		margin-inline: auto;
 		padding: 0.5rem 0.75rem;
 		background: var(--main);
 		border: 1px solid var(--border);
@@ -254,6 +222,12 @@
 		&:focus-within {
 			border-color: var(--link);
 			box-shadow: 0 0 0 1px var(--link);
+		}
+
+		// Two thirds of a narrow window leaves too little to type into, so below
+		// this the field takes the width it has.
+		@media (max-width: 640px) {
+			width: 100%;
 		}
 	}
 

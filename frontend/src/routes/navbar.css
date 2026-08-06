@@ -1,30 +1,5 @@
 /* navbar.css */
 
-/* Toggle Button Styles */
-.navbar-toggle-button {
-    position: fixed;
-    left: 10%;
-    background-color: var(--tertiary);
-    border-bottom-left-radius: 0.25rem;
-    border-bottom-right-radius: 0.25rem;
-    padding: 0.25rem;
-    cursor: pointer;
-    z-index: 20;
-    transition: all 0.3s ease;
-}
-
-.navbar-toggle-button.expanded {
-    top: 4rem; /* Match navbar height */
-}
-
-.navbar-toggle-button.collapsed {
-    top: 0;
-}
-
-.navbar-toggle-button:hover {
-    background-color: var(--tertiary-hover);
-}
-
 /* Navbar Container Styles */
 .navbar-container {
     position: fixed;
@@ -32,19 +7,12 @@
     left: 0;
     right: 0;
     height: 4rem; /* Adjust based on your navbar height */
-    transform-origin: top;
-    transition: transform 0.3s ease;
     z-index: 10;
     background-color: var(--keypress-1);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 1.5rem;
-}
-
-.navbar-container.collapsed {
-    transform: translateY(-100%);
-    transition: transform 0.3s ease;
 }
 
 /* Navbar Left Side */

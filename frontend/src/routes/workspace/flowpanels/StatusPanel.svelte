@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Check, X, Play, TriangleAlert } from "lucide-svelte";
-  import { isExpanded } from '$lib/stores/navbar';
   export let isStatusPanelExpanded;
   /**
    * `message` is already user-facing text - nodes are named the way the canvas
@@ -15,13 +14,9 @@
     nodeId?: string;
   }[];
   export let executionStatus;
-  $: expandedClass = $isExpanded ? 'expanded' : '';
 </script>
 
-<div
-  class="status-panel {expandedClass}"
-  style="transform: translateX({isStatusPanelExpanded ? '0' : '100%'})"
->
+<div class="status-panel" class:panel-open={isStatusPanelExpanded}>
   <div class="panel-spacing">
     <h2 class="text-lg font-semibold mb-4 flex-center flex-gap">
       <svelte:component

@@ -115,8 +115,8 @@
     width: 300px;
     background-color: var(--secondary);
     overflow-y: auto;
-    transition: transform 0.3s ease;
-    transition: margin-top 0.3s;
+    transform: translateX(100%);
+    margin-top: 4rem; /* clears the fixed navbar */
 }
 
 /* Common spacing */
@@ -168,15 +168,30 @@
     width: 300px;
     background-color: var(--secondary);
     overflow-y: auto;
-    transition: transform 0.3s ease;
-    transition: margin-top 0.3s;
+    transform: translateX(-100%);
+    margin-top: 4rem; /* clears the fixed navbar */
 }
 
-.left-panel.expanded,
-  .status-panel.expanded {
-    transition: margin-top 0.3s;
-    margin-top: 4rem;
-  }
+/* Both panels stay mounted and are parked off their own edge; `.panel-open` is
+   what slides them back in, so opening animates for the same reason closing
+   does. The panel's transform has to be the only transition on these elements -
+   `transition` is a shorthand, so a second declaration would silently drop it.
+
+   `visibility` is stepped rather than eased: it flips to visible immediately on
+   the way in, and waits out the slide on the way back, which keeps a closed
+   panel off the tab order instead of leaving its controls reachable off-screen. */
+.left-panel,
+.status-panel {
+    visibility: hidden;
+    transition: transform 0.3s ease, visibility 0s linear 0.3s;
+}
+
+.left-panel.panel-open,
+.status-panel.panel-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.3s ease, visibility 0s;
+}
 
 /* Left panel toggle button  */
 .left-toggle-button {
@@ -238,10 +253,7 @@
 .nav-button-container {
     transition: margin-top 0.3s;
     transform-origin: right center;
-}
-.nav-button-container.expanded {
-    transition: margin-top 0.3s;
-    margin-top: 4rem;
+    margin-top: 4rem; /* clears the fixed navbar */
 }
 
 /* Slide-in animation */

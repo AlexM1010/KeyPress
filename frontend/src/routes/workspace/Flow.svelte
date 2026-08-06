@@ -45,7 +45,6 @@
   import { flowTheme } from "$lib/stores/theme";
   import "$lib/index.scss";
   import "./FlowStyle.css";
-  import { isExpanded } from '$lib/stores/navbar';
 
   // Import icons from Lucide Svelte
   import {
@@ -62,8 +61,6 @@
   import LeftPanelToggleButton from './flowpanels/LeftPanelToggleButton.svelte';
   import StatusPanel from './flowpanels/StatusPanel.svelte';
   import StatusPanelToggleButton from './flowpanels/StatusPanelToggleButton.svelte';
-
-  $: expandedClass = $isExpanded ? 'expanded' : '';
 
   // NOTE: node edits do not travel back up through Svelte events. `<SvelteFlow>`
   // instantiates the custom node components itself from `nodeTypes`, so they are not
@@ -798,10 +795,9 @@
 </svelte:head>
 
 <div class="flow-container flex">
-  <!-- Left Panel -->
-  {#if isLeftPanelExpanded}
-    <LeftPanel />
-  {/if}
+  <!-- Left Panel. Kept mounted so it can slide both ways; an `{#if}` here would
+       make opening a pop rather than a slide. -->
+  <LeftPanel {isLeftPanelExpanded} />
 
   <!-- Left Panel Toggle Button -->
   <LeftPanelToggleButton
@@ -835,7 +831,7 @@
       <!-- Control Panel -->
       <Panel position="top-right">
         <div class="flex flex-col items-end">
-          <div class="nav-button-container flex-center flex-gap transition-transform duration-300 {expandedClass}">
+          <div class="nav-button-container flex-center flex-gap transition-transform duration-300">
             <!-- Macro name: decides which file on disk the save writes to.
                  Required, and unique across macros - a rejected save reports
                  why just below. -->

@@ -1,12 +1,15 @@
 <script lang="ts">
   import { Plus, Play, Palette, Keyboard } from "lucide-svelte";
-  import { isExpanded } from '$lib/stores/navbar';
   import MouseClickNode from '$lib/components/Workspace/customNodes/MouseClickNode.svelte';
   import MouseMoveNode from '$lib/components/Workspace/customNodes/MouseMoveNode.svelte';
   import StartNode from '$lib/components/Workspace/customNodes/StartNode.svelte';
   import DelayNode from '$lib/components/Workspace/customNodes/DelayNode.svelte';
   import ColorPickerNode from '$lib/components/Workspace/customNodes/ColorPickerNode.svelte';
   import KeyPressNode from '$lib/components/Workspace/customNodes/KeyPressNode.svelte';
+
+  // The panel stays mounted whether or not it is showing - it slides in and out
+  // on this, rather than being added to and removed from the page.
+  export let isLeftPanelExpanded = true;
 
   export let availableNodes = [
     {
@@ -90,8 +93,6 @@
     }
   ];
 
-  $: expandedClass = $isExpanded ? 'expanded' : '';
-
   // Function to handle drag start event
   function onDragStart(event: DragEvent, nodeType: string) {
     event.dataTransfer?.setData("application/svelteflow", nodeType);
@@ -101,7 +102,7 @@
   }
 </script>
 
-<div class="left-panel {expandedClass}">
+<div class="left-panel" class:panel-open={isLeftPanelExpanded}>
   <div class="panel-spacing">
     <h2 class="text-lg font-semibold mb-4 flex-center flex-gap">
       <Plus class="flow-icon" />
