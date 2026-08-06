@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Plus, Play, Palette, Keyboard } from "lucide-svelte";
+  import { setContext } from "svelte";
+  import { Play, Palette, Keyboard } from "lucide-svelte";
   import MouseClickNode from '$lib/components/Workspace/customNodes/MouseClickNode.svelte';
   import MouseMoveNode from '$lib/components/Workspace/customNodes/MouseMoveNode.svelte';
   import StartNode from '$lib/components/Workspace/customNodes/StartNode.svelte';
@@ -93,25 +94,72 @@
     }
   ];
 
+  // Every node below is a drag preview, not a node in the flow. NodeWrapper reads
+  // this to leave off the duplicate/delete menu, which would act on nothing here.
+  setContext('nodePreview', true);
+
+  // Builds the picture the cursor carries during a drag.
+  //
+  // Handing the <li> straight to setDragImage produced a translucent box round
+  // the node: the <li> is the full width of the panel and taller than the
+  // scaled-down preview inside it, and the node's own glass background
+  // (rgba white + backdrop-filter) has nothing behind it in a drag snapshot, so
+  // it washes out. Snapshotting a clone of just the node, on a slab of the
+  // panel colour, makes the drag image the node exactly as it sits in the list.
+  function buildDragImage(node: HTMLElement): HTMLElement {
+    const rect = node.getBoundingClientRect();
+    // rect is post-transform, offsetWidth is not, so this recovers whatever
+    // scale .node-preview applies without hard-coding it here.
+    const scale = node.offsetWidth ? rect.width / node.offsetWidth : 1;
+
+    const clone = node.cloneNode(true) as HTMLElement;
+    clone.style.width = `${node.offsetWidth}px`;
+    clone.style.margin = "0";
+    clone.style.transform = `scale(${scale})`;
+    clone.style.transformOrigin = "top left";
+
+    const ghost = document.createElement("div");
+    ghost.className = "node-drag-ghost";
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.height = `${rect.height}px`;
+    ghost.appendChild(clone);
+    document.body.appendChild(ghost);
+
+    return ghost;
+  }
+
   // Function to handle drag start event
   function onDragStart(event: DragEvent, nodeType: string) {
     event.dataTransfer?.setData("application/svelteflow", nodeType);
     event.dataTransfer?.setData("text/plain", nodeType);
-    event.dataTransfer?.setDragImage(event.target as Element, 0, 0);
+
+    const node = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(
+      ".node-preview > *"
+    );
+    if (node && event.dataTransfer) {
+      const rect = node.getBoundingClientRect();
+      const ghost = buildDragImage(node);
+      // Offsets keep the node under the same point of it the pointer grabbed.
+      event.dataTransfer.setDragImage(
+        ghost,
+        event.clientX - rect.left,
+        event.clientY - rect.top
+      );
+      // The browser snapshots the element during setDragImage, so the clone
+      // only needs to outlive this frame.
+      requestAnimationFrame(() => ghost.remove());
+    }
+
     event.dataTransfer!.effectAllowed = "move";
   }
 </script>
 
 <div class="left-panel" class:panel-open={isLeftPanelExpanded}>
   <div class="panel-spacing">
-    <h2 class="text-lg font-semibold mb-4 flex-center flex-gap">
-      <Plus class="flow-icon" />
-      <span>Nodes</span>
-    </h2>
     {#each availableNodes as group}
       <div class="node-group">
         <h3 class="text-sm font-medium text-secondary mb-2">{group.group}</h3>
-        <ul>
+        <ul class="node-list">
           {#each group.nodes as node}
             <li
               class="draggable-node"

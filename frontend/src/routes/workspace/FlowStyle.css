@@ -229,6 +229,21 @@
     padding-right: 300px;
 }
 
+/* A node carries no margin of its own - on the canvas it is positioned
+   absolutely and nothing ever butts up against it - so the palette's list and
+   groups supply all of the spacing between previews. It goes on these boxes
+   rather than inside `.node-preview` because the `zoom` below would shrink a
+   gap set in there along with the node. */
+.node-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.node-group + .node-group {
+    margin-top: 1.5rem;
+}
+
 /* Draggable node styles */
 .draggable-node {
     display: flex;
@@ -236,13 +251,34 @@
     cursor: grab;
 }
 
+/* Nodes are a fixed 300px wide (see `nodeComponents/NodeWrapper.svelte`), which
+   is the panel's own width, so a preview has to be shrunk to sit inside it.
+   `zoom` rather than `transform: scale()`: a transform paints smaller but leaves
+   the full-size box in the layout, so the panel - which scrolls vertically, and
+   therefore cannot leave the other axis visible - would grow a horizontal
+   scrollbar and a gap under every preview. `zoom` shrinks the box itself, so the
+   list lays out at the size it looks. */
 .node-preview {
-    transform: scale(0.8); /* Adjust scale as needed */
+    zoom: 0.8;
 }
 
 /* Prevent text selection during drag */
 .draggable-node:active {
     cursor: grabbing;
+}
+
+/* Off-screen stand-in that LeftPanel hands to setDragImage. It has to be in the
+   document and rendered for the browser to snapshot it, hence parked above the
+   viewport rather than hidden. The panel colour behind the clone is what stops
+   the node's glass background reading as a see-through box while it is dragged. */
+.node-drag-ghost {
+    position: fixed;
+    top: -10000px;
+    left: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background-color: var(--secondary);
+    border-radius: 1rem;
 }
 
 /* Button container styles */
