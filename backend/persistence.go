@@ -31,6 +31,19 @@ const (
 	// maxProjectIDLen bounds ids so that no name - however long or hostile -
 	// can produce a path the filesystem rejects.
 	maxProjectIDLen = 128
+
+	// maxMacroNameLen bounds the display name, which is stored in the file
+	// rather than used as a filename and so is not covered by maxProjectIDLen.
+	// Without it a paste accident becomes a megabyte of JSON that every
+	// ListProjects call then reads back. Counted in runes, because that is what
+	// the user typed; the limit is above maxProjectIDLen so that any name short
+	// enough to slugify in full is accepted.
+	maxMacroNameLen = 200
+
+	// tempFilePattern names the scratch file a save is written to before it is
+	// renamed into place. The ".tmp" ending is what keeps one left behind by a
+	// crash out of ListProjects, which matches on a ".json" extension.
+	tempFilePattern = "macro-*" + projectFileExt + ".tmp"
 )
 
 // SaveFile writes the flow data to one JSON file per macro in the app data
@@ -61,6 +74,10 @@ const (
 // Giving the open macro a new name is a rename, not a copy: the file it used to
 // live in is removed once the new one is safely on disk, so the macro list shows
 // it once under its new name instead of twice under both.
+//
+// A save that fails costs the user nothing that was already saved: the graph is
+// written to a temporary file and renamed into place, so the macro on disk is
+// either the old one or the new one at every instant. See writeMacroFile.
 func (a *App) SaveFile(flowData FlowData, name string, currentID string) (string, error) {
 	displayName := strings.TrimSpace(name)
 
@@ -100,6 +117,9 @@ func saveMacro(flowData FlowData, displayName string, currentID string) (id stri
 	if displayName == "" {
 		return "", "", errors.New("a macro name is required")
 	}
+	if length := len([]rune(displayName)); length > maxMacroNameLen {
+		return "", "", fmt.Errorf("macro name is too long (%d characters, maximum %d)", length, maxMacroNameLen)
+	}
 
 	id = slugifyProjectID(displayName)
 	if id == "" {
@@ -133,37 +153,28 @@ func saveMacro(flowData FlowData, displayName string, currentID string) (id stri
 	flowData.ID = ""
 	flowData.Name = displayName
 
+	// A nil slice marshals to JSON null, and ListProjects treats a file with no
+	// "nodes" array as something other than a macro and skips it - so a graph
+	// the user had emptied would save without complaint and then be missing
+	// from the macro list. Empty slices keep an empty macro a macro.
+	if flowData.Nodes == nil {
+		flowData.Nodes = []Node{}
+	}
+	if flowData.Edges == nil {
+		flowData.Edges = []Edge{}
+	}
+
 	jsonData, err := json.MarshalIndent(flowData, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to encode macro %q: %w", displayName, err)
 	}
+	jsonData = append(jsonData, '\n')
 
-	// O_EXCL rather than a stat-then-write: the existence check and the create
-	// are one syscall, so a macro that appears between the two cannot be
-	// clobbered by the write that just checked it was absent. Only the macro
-	// already open gets O_TRUNC, and only onto its own file.
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	if isOwnFile {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	}
-
-	file, err := os.OpenFile(fullPath, flags, 0644)
-	if err != nil {
+	if err := writeMacroFile(fullPath, jsonData, isOwnFile); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return "", "", fmt.Errorf("a macro named %q already exists (%s%s) - pick a different name", displayName, id, projectFileExt)
 		}
 		return "", "", fmt.Errorf("failed to save macro %q: %w", displayName, err)
-	}
-
-	if err := writeAndClose(file, jsonData); err != nil {
-		if !isOwnFile {
-			// This call created the file moments ago and it never became a
-			// valid macro; leaving the stub behind would block the retry.
-			if rmErr := os.Remove(fullPath); rmErr != nil {
-				log.Printf("saveMacro: failed to clean up %q: %v", fullPath, rmErr)
-			}
-		}
-		return "", "", fmt.Errorf("failed to write macro %q: %w", displayName, err)
 	}
 
 	// Everything past this point is bookkeeping around a macro that is already
@@ -238,14 +249,106 @@ func removeRenamedFile(openID string, newPath string) string {
 	return ""
 }
 
-// writeAndClose writes data to file and closes it, reporting whichever of the
-// two failed. Close is what surfaces a failed flush, so its error matters.
-func writeAndClose(file *os.File, data []byte) error {
+// writeMacroFile puts data at fullPath without ever leaving a half-written
+// macro there.
+//
+// The bytes go to a temporary file in the same directory, are flushed to disk,
+// and are then renamed over the destination. The rename is atomic and the
+// directory is the same one, so it stays on a single filesystem: a crash, a
+// power cut or a full disk part-way through leaves either the previous macro or
+// the new one, never a truncated file that no longer parses. Writing in place
+// would put the user's saved work at the mercy of every write after the first.
+//
+// replacing says the destination is the caller's own macro and may be
+// overwritten. When it is false the name must not already be taken, and that is
+// settled by creating the destination empty with O_EXCL *before* the temporary
+// file is written: the check and the claim are then one syscall, so a macro
+// that appears in between cannot be clobbered by a rename that just found the
+// name free. The reservation is removed again if anything after it fails, so a
+// failed save never leaves an empty macro behind to block the retry.
+//
+// A caller that gets fs.ErrExist back is being told the name is taken; every
+// other error is a genuine write failure.
+func writeMacroFile(fullPath string, data []byte, replacing bool) error {
+	if !replacing {
+		reservation, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			// fs.ErrExist included: the caller turns it into the "pick a
+			// different name" message, and wrapping it here would only make
+			// that harder to spot.
+			return err
+		}
+		if err := reservation.Close(); err != nil {
+			removeIgnoringMissing(fullPath)
+			return err
+		}
+	}
+
+	// Same directory as the destination, so the rename below is a rename and
+	// not a copy across filesystems.
+	tmp, err := os.CreateTemp(filepath.Dir(fullPath), tempFilePattern)
+	if err != nil {
+		if !replacing {
+			removeIgnoringMissing(fullPath)
+		}
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	// CreateTemp makes the file 0600, and it is the file that ends up being the
+	// macro. Without this every saved macro would quietly become user-only on
+	// the platforms where the mode means anything, purely as a side effect of
+	// how it was written. Not fatal if it fails: the macro is the point, its
+	// group bit is not.
+	if err := tmp.Chmod(0644); err != nil {
+		log.Printf("persistence: could not set the mode on %q: %v", tmpPath, err)
+	}
+
+	if err := writeSyncClose(tmp, data); err != nil {
+		removeIgnoringMissing(tmpPath)
+		if !replacing {
+			removeIgnoringMissing(fullPath)
+		}
+		return err
+	}
+
+	if err := os.Rename(tmpPath, fullPath); err != nil {
+		removeIgnoringMissing(tmpPath)
+		if !replacing {
+			removeIgnoringMissing(fullPath)
+		}
+		return err
+	}
+
+	return nil
+}
+
+// writeSyncClose writes data to file, flushes it to disk and closes it,
+// reporting whichever step failed.
+//
+// The Sync is what makes the rename in writeMacroFile worth doing: renaming a
+// file whose contents are still only in the page cache would leave the macro
+// exactly as losable as writing it in place. Close matters too - on some
+// filesystems it is where a failed write finally surfaces.
+func writeSyncClose(file *os.File, data []byte) error {
 	if _, err := file.Write(data); err != nil {
 		file.Close()
 		return err
 	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
 	return file.Close()
+}
+
+// removeIgnoringMissing deletes path, logging anything except it already being
+// gone. Every caller is cleaning up after a failure it is about to report, so
+// there is nothing here worth a second error.
+func removeIgnoringMissing(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("persistence: failed to clean up %q: %v", path, err)
+	}
 }
 
 // ListProjects enumerates the saved macros in the app data directory.
