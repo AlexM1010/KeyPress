@@ -26,10 +26,11 @@
                 <svelte:component this={icon} class="w-4 h-4" />
             </div>
         {/if}
+        <!-- The left padding only clears an icon when there is one to clear. -->
         <select
             {id}
             bind:value
-            class="w-full pr-3 py-2 pl-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+            class="select-input w-full pr-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 {icon ? 'pl-10' : 'pl-3'}"
         >
             {#each options as opt}
                 <option value={opt}>{opt}</option>
@@ -37,3 +38,27 @@
         </select>
     </div>
 </div>
+
+<style>
+    /* Themed like the number and time inputs the other nodes use, rather than
+       the fixed light grey this carried before: a node sits on a translucent
+       card that is dark under the dark theme, so a hard-coded light control was
+       the one piece of a node that ignored the theme. */
+    .select-input {
+        background-color: var(--main);
+        color: var(--main-text);
+        border: 1px solid var(--border);
+        transition: background-color 0.3s;
+    }
+
+    .select-input:hover {
+        background-color: var(--main-hover);
+    }
+
+    /* The dropdown list is painted by the browser, which does not inherit the
+       control's colours into it on every platform. */
+    .select-input option {
+        background-color: var(--secondary);
+        color: var(--main-text);
+    }
+</style>
