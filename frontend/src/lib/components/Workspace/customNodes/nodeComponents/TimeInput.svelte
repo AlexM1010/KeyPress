@@ -17,6 +17,13 @@
         'min': 60 * 1000
     };
 
+    // Arrow step per unit, in ms: 50ms at a time in ms, otherwise a whole unit.
+    const STEP_MS: ConversionFactors = {
+        'ms': 50,
+        's': 1000,
+        'min': 60 * 1000
+    };
+
     const UNIT_DISPLAY_NAMES: Record<TimeUnit, string> = {
         'ms': 'milliseconds',
         's': 'seconds',
@@ -31,7 +38,9 @@
     let unit: TimeUnit = startingUnit;
 
     export let showArrows: boolean = true;
-    export let step: number = 1;
+    /** Arrow step override, in milliseconds. Defaults to STEP_MS for the current unit. */
+    export let step: number | null = null;
+    $: stepMs = step ?? STEP_MS[unit];
     export let minValue: number | null = null;
     export let maxValue: number | null = null;
 
@@ -68,20 +77,29 @@
         unit = UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length];
     }
 
+    function decimalsFor(n: number) {
+        return String(n).split('.')[1]?.length ?? 0;
+    }
+
+    function applyStep(valueInMs: number) {
+        const newDisplay = valueInMs / TO_MS[unit];
+        // Keep enough precision for the stepped value to survive the toFixed above.
+        significantDigits = Math.max(significantDigits, decimalsFor(newDisplay));
+        value = valueInMs;
+    }
+
     function increment() {
-        let newValue = displayValue + step;
-        if (maxValue === null || newValue <= maxValue) {
-            const valueInMs = newValue * TO_MS[unit];
-            value = valueInMs;
+        const newValue = value + stepMs;
+        if (maxValue === null || newValue / TO_MS[unit] <= maxValue) {
+            applyStep(newValue);
         }
     }
 
     function decrement() {
-        let newValue = displayValue - step;
+        const newValue = value - stepMs;
         const min = minValue !== null ? minValue : 0;
-        if (newValue >= min) {
-            const valueInMs = newValue * TO_MS[unit];
-            value = valueInMs;
+        if (newValue / TO_MS[unit] >= min) {
+            applyStep(newValue);
         }
     }
 

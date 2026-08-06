@@ -217,7 +217,7 @@ func parseCharacter(raw interface{}) (rune, error) {
 	}
 	if unicode.IsControl(character) {
 		return 0, fmt.Errorf(
-			"%q is a control character, not one that can be typed: set this node's Key Type to Named and pick "+
+			"%q is a control character, not one that can be typed: set this node's Key Type to Special and pick "+
 				"the key itself (enter, tab, escape) instead", text)
 	}
 

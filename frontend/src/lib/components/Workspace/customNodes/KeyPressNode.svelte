@@ -5,7 +5,9 @@
     import NodeWrapper from './nodeComponents/NodeWrapper.svelte';
     import Checkbox from './nodeComponents/Checkbox.svelte';
     import Select from './nodeComponents/Select.svelte';
-    import Slider from './nodeComponents/Slider.svelte';
+    import TimeInput from './nodeComponents/TimeInput.svelte';
+    import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
+    import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
     import type { HandleConfig } from './types';
 
@@ -26,6 +28,8 @@
      * `namedKey` is the other half: keys that print no character at all (Enter,
      * F5, the arrows) are the same key on every layout, so those are stored by
      * name and need no resolution. `keyKind` says which of the two is in use.
+     * The UI calls that kind "Special"; the stored value stays `Named` because
+     * the Go handler and every saved flow already speak that word.
      *
      * `modifiers` is a set - the empty array means no modifier, so there is no
      * "None" sentinel. Whatever the layout itself needs to reach the character
@@ -68,6 +72,11 @@
      * applies its own shift and US-layout rewrites to it, which is exactly what
      * the Character key type exists to avoid. Characters never appear in this
      * list.
+     *
+     * The keypad digits and its symbol keys (`num0`-`num9`, `num.`, `num+` and
+     * friends) are deliberately absent: every one of them prints a character, so
+     * the Character kind already covers what a user actually wants from them and
+     * covers it on any layout. `num_lock` stays because it prints nothing.
      */
     export let namedKeys: string[] = [
         // Editing and navigation
@@ -78,14 +87,53 @@
         // Function row
         'f1', 'f2', 'f3', 'f4', 'f5', 'f6',
         'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
-        // Numeric keypad, which is its own set of keys rather than the digit row
-        'num0', 'num1', 'num2', 'num3', 'num4',
-        'num5', 'num6', 'num7', 'num8', 'num9',
-        'num.', 'num+', 'num-', 'num*', 'num/', 'num_enter', 'num_lock'
+        // The two keypad keys that print no character of their own
+        'num_enter', 'num_lock'
     ];
 
-    export let keyKinds: string[] = ['Character', 'Named'];
-    export let keyActions: string[] = ['Press', 'Hold', 'Release'];
+    /**
+     * The list as the dropdown shows it: alphabetical, so a key is found by
+     * looking rather than by scanning the whole list.
+     *
+     * Sorted here rather than in the literal above so the grouping comments stay
+     * meaningful and a caller passing its own `namedKeys` gets the same ordering
+     * for free. `localeCompare` keeps `f2` before `f10` from being the only
+     * question this raises - it does not, so plain lexicographic order it is, and
+     * `f10` sitting between `f1` and `f2` is what someone reading an A-Z list
+     * expects anyway.
+     */
+    $: sortedNamedKeys = [...namedKeys].sort((a, b) => a.localeCompare(b));
+
+    /**
+     * The dropdown's options: the list above, plus whatever this node already
+     * holds if that is no longer on it.
+     *
+     * A flow saved before the keypad keys were dropped still names one, and the
+     * backend still runs it. Without this the `<select>` would find no matching
+     * option and render blank, so the node would show nothing where it should
+     * show `num5` - the choice would look lost while still being what runs.
+     */
+    $: namedKeyOptions = sortedNamedKeys.includes(data.namedKey)
+        ? sortedNamedKeys
+        : [...sortedNamedKeys, data.namedKey].sort((a, b) => a.localeCompare(b));
+
+    // Typed as the payload's own unions rather than plain strings, so the button
+    // groups below can write a choice straight into `data` without a cast.
+    export let keyKinds: KeyPressNodeData['keyKind'][] = ['Character', 'Named'];
+    export let keyActions: KeyPressNodeData['keyAction'][] = ['Press', 'Hold', 'Release'];
+
+    /**
+     * What each key kind is called on screen.
+     *
+     * "Special" is the label only. Changing the stored value to match would make
+     * every already-saved Keypress node unreadable to the Go handler, which
+     * accepts `character` and `named` and nothing else, so the rename stops at
+     * the button face.
+     */
+    const KEY_KIND_LABELS: Record<KeyPressNodeData['keyKind'], string> = {
+        Character: 'Character',
+        Named: 'Special'
+    };
 
     /**
      * The modifiers that can be held alongside the keystroke.
@@ -97,22 +145,20 @@
     type ModifierName = (typeof MODIFIER_OPTIONS)[number];
 
     /**
-     * Bounds of the Press Duration slider, in milliseconds.
+     * Arrow step of the Press Duration input, in milliseconds.
      *
-     * `Slider` defaults to a 0-100 range labelled `%`, which is wrong twice over
-     * for this field: it reads as a percentage, and because the slider clamps
-     * and writes back through its binding it would quietly rewrite a saved value
-     * above 100 down to 100. Passing millisecond-appropriate bounds fixes both
-     * without touching the shared component's defaults, which `MouseMoveNode`'s
-     * percentage slider still relies on.
+     * The field is a `TimeInput`, the same control the Delay node uses, so a
+     * duration is typed and its unit switched here exactly as it is there rather
+     * than dragged along a bar with a range someone had to pick. That also means
+     * no upper bound: `TimeInput` reads `maxValue` in the *displayed* unit, so
+     * one that held at 1000 ms would read as 1000 seconds the moment the unit
+     * button was pressed.
      *
-     * One second is the ceiling because this is the *hold* time of a single
-     * keystroke, not a wait: key auto-repeat starts around half a second in on
-     * every desktop OS, so past that it stops being one keypress. A pause
-     * between keystrokes belongs in a Delay node, which has a real time input.
+     * Worth knowing rather than enforcing: this is the *hold* time of a single
+     * keystroke, and key auto-repeat starts around half a second in on every
+     * desktop OS, so a long value stops being one keypress. A pause between
+     * keystrokes belongs in a Delay node.
      */
-    const PRESS_DURATION_MIN_MS = 0;
-    const PRESS_DURATION_MAX_MS = 1000;
     const PRESS_DURATION_STEP_MS = 10;
 
     const DEFAULT_DATA: KeyPressNodeData = {
@@ -184,42 +230,25 @@
     // cannot re-trigger it.
     $: syncModifiers(modifierChecked);
 
-    // These read `data.*`, and Svelte 4 invalidates `data` on every `bind:`
-    // write to one of its properties, so the preview tracks the controls. Note
-    // they only *read* - nothing here reassigns `data`, which would detach this
-    // component from the flow store.
-    $: chosenKey = data.keyKind === 'Named' ? data.namedKey : data.character;
-
-    // Filtered so an empty Character box shows no chip at all rather than an
-    // empty one that reads as a key.
-    $: comboParts = [...data.modifiers, chosenKey].filter((part) => part !== '');
-
-    $: actionSummary =
-        data.keyAction === 'Hold'
-            ? 'Pushed down and left down until a Release node lets it up.'
-            : data.keyAction === 'Release'
-              ? 'Let back up.'
-              : `Held down for ${data.pressDuration} ms, then released.`;
-
     /**
-     * What the keystroke types, or '' when claiming anything would be a guess.
+     * Select the character box's contents, so the next key typed replaces what
+     * is there instead of being rejected.
      *
-     * A character node can promise the character itself, because the keystroke
-     * is worked out from the live keyboard layout rather than baked into the
-     * save - that promise is the whole point of storing the character. It cannot
-     * promise anything once a modifier is added on top, because Shift over `1`
-     * is `!` on a UK keyboard and something else elsewhere, and Ctrl or Alt make
-     * it a shortcut rather than text at all. A named key types nothing by
-     * definition, and so does Release.
+     * The box holds one character and `maxlength` is 1, so a click that leaves
+     * the caret *after* that character makes the field look editable while
+     * swallowing every keystroke - the only way forward would be Backspace
+     * first. Selecting on the way in makes the existing character the thing
+     * being overwritten, which is what clicking a one-character field is for.
+     *
+     * Wired to both focus and mouse-up because neither alone is enough: focus
+     * does not fire when an already-focused box is clicked again, and the
+     * browser collapses the selection to a caret on mouse-up, so that event is
+     * also where the default has to be suppressed. Dragging across a single
+     * character has nothing to offer that this takes away.
      */
-    $: typedSummary =
-        data.keyAction === 'Release' || data.keyKind === 'Named'
-            ? ''
-            : data.character === ''
-              ? 'Pick a character for this node to type.'
-              : data.modifiers.length > 0
-                ? `Sends the combination above. What that types depends on the keyboard, so drop the modifiers if you just want to type “${data.character}”.`
-                : `Types “${data.character}”, whatever keyboard layout is in use when the flow runs.`;
+    function selectCharacter(event: Event): void {
+        (event.currentTarget as HTMLInputElement).select();
+    }
 
     $$restProps;
 </script>
@@ -231,56 +260,97 @@
     {id}
     type="KeyPressNode"
     {handles}
-    on:duplicate
-    on:delete
 >
-    <!-- Node content for configuring the keystroke.
+    <!-- Node content for configuring the keystroke. The section headings and
+         button groups are the same shapes the Mouse Move and Mouse Click nodes
+         use, so this reads as one of the family rather than a form of its own.
 
          `nodrag` keeps Svelte Flow from turning a click on a control into a node
          drag; it is matched against the event target's ancestors, so wrapping
          the controls here covers all of them. -->
-    <div class="nodrag space-y-4">
-        <div class="space-y-1.5">
-            <Select label="Key Type" options={keyKinds} bind:value={data.keyKind} />
-            <p class="text-xs opacity-70">
-                <b class="font-medium">Character</b> types a character -
-                <b class="font-mono">a</b>, <b class="font-mono">A</b>,
-                <b class="font-mono">!</b>, <b class="font-mono">£</b> - and finds the key for it
-                on whatever keyboard is in use. <b class="font-medium">Named</b> presses a key with
-                no character of its own.
-            </p>
+    <div class="nodrag grid gap-6">
+        <!-- Which kind of key, and then the key itself -->
+        <div class="grid gap-4">
+            <h3 class="text-sm font-medium --main-text">Key</h3>
+            <ButtonGroup variant="default">
+                {#each keyKinds as kind (kind)}
+                    <ButtonGroupItem
+                        value={kind}
+                        on:click={() => (data.keyKind = kind)}
+                        active={data.keyKind === kind}
+                        itemHighlightColor={highlightColor}
+                    >
+                        {KEY_KIND_LABELS[kind]}
+                    </ButtonGroupItem>
+                {/each}
+            </ButtonGroup>
+
+            {#if data.keyKind === 'Named'}
+                <Select
+                    label="Special Key"
+                    options={namedKeyOptions}
+                    icon={Keyboard}
+                    bind:value={data.namedKey}
+                />
+            {:else}
+                <!-- A free-text box rather than a list: any character can be
+                     typed, including ones no fixed list would think to offer.
+                     One character only - this node is one keystroke. -->
+                <div class="flex items-center gap-2">
+                    <label class="text-sm --main-text" for="character-{id}">Character</label>
+                    <input
+                        id="character-{id}"
+                        type="text"
+                        maxlength="1"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="!"
+                        bind:value={data.character}
+                        on:focus={selectCharacter}
+                        on:mouseup|preventDefault={selectCharacter}
+                        class="character-input h-8 w-12 rounded-md px-2 text-center font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                </div>
+            {/if}
         </div>
 
-        {#if data.keyKind === 'Named'}
-            <Select label="Key" options={namedKeys} icon={Keyboard} bind:value={data.namedKey} />
-        {:else}
-            <!-- A free-text box rather than a list: any character can be typed,
-                 including ones no fixed list would think to offer. One character
-                 only - this node is one keystroke. -->
-            <div class="space-y-1.5">
-                <label class="block text-xs font-medium --main-text" for="character-{id}">
-                    Character
-                </label>
-                <input
-                    id="character-{id}"
-                    type="text"
-                    maxlength="1"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="!"
-                    bind:value={data.character}
-                    class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center font-mono text-sm focus:border-transparent focus:ring-2 focus:ring-blue-400"
-                />
-            </div>
-        {/if}
+        <!-- What to do with it, and for how long -->
+        <div class="grid gap-4">
+            <h3 class="text-sm font-medium --main-text">Key Action</h3>
+            <ButtonGroup variant="default">
+                {#each keyActions as action (action)}
+                    <ButtonGroupItem
+                        value={action}
+                        on:click={() => (data.keyAction = action)}
+                        active={data.keyAction === action}
+                        itemHighlightColor={highlightColor}
+                    >
+                        {action}
+                    </ButtonGroupItem>
+                {/each}
+            </ButtonGroup>
 
-        <Select label="Key Action" options={keyActions} bind:value={data.keyAction} />
+            <!-- Only meaningful for "Press": "Hold" and "Release" are
+                 instantaneous toggles that leave the key down for later nodes to
+                 deal with. -->
+            {#if data.keyAction === 'Press'}
+                <TimeInput
+                    label="Press Duration"
+                    bind:value={data.pressDuration}
+                    defaultValue={DEFAULT_DATA.pressDuration}
+                    startingUnit="ms"
+                    minValue={0}
+                    step={PRESS_DURATION_STEP_MS}
+                    {highlightColor}
+                />
+            {/if}
+        </div>
 
         <!-- Any combination, so Ctrl+Shift+A is one node rather than an
              impossible one. Nothing needs to be ticked; no ticks means a plain
              keystroke. -->
-        <div class="space-y-1.5">
-            <span class="block text-xs font-medium --main-text">Modifiers</span>
+        <div class="grid gap-4">
+            <h3 class="text-sm font-medium --main-text">Modifiers</h3>
             <div class="flex flex-wrap gap-x-4 gap-y-2">
                 {#each MODIFIER_OPTIONS as name (name)}
                     <Checkbox label={name} {highlightColor} bind:checked={modifierChecked[name]} />
@@ -288,48 +358,20 @@
             </div>
         </div>
 
-        <!-- Only meaningful for "Press": "Hold" and "Release" are instantaneous
-             toggles that leave the key down for later nodes to deal with. -->
-        {#if data.keyAction === 'Press'}
-            <Slider
-                label="Press Duration"
-                unit="ms"
-                min={PRESS_DURATION_MIN_MS}
-                max={PRESS_DURATION_MAX_MS}
-                step={PRESS_DURATION_STEP_MS}
-                defaultValue={DEFAULT_DATA.pressDuration}
-                bind:value={data.pressDuration}
-            />
-        {/if}
-
-        <!-- Effective keystroke, so the combination the controls add up to is
-             readable at a glance instead of being assembled in the user's head.
-             The chips repeat the chosen values verbatim rather than prettifying
-             them, so there is no display name that could drift from what the
-             backend is actually sent. -->
-        <!-- The text colour is pinned rather than inherited. The labels above sit
-             on the node's own translucent background and inherit the theme's text
-             colour, which is white under the dark theme; this panel has an opaque
-             light background of its own (the same `bg-gray-50` the Selects use),
-             so inherited white would be invisible on it. -->
-        <div
-            class="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700"
-        >
-            <span class="block text-xs font-medium">Keystroke</span>
-            <div class="flex flex-wrap items-center gap-1">
-                {#each comboParts as part, index (index)}
-                    {#if index > 0}
-                        <span class="text-xs opacity-60">+</span>
-                    {/if}
-                    <kbd
-                        class="rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-xs text-gray-800 shadow-sm"
-                        >{part}</kbd
-                    >
-                {/each}
-            </div>
-            <p class="text-xs opacity-70">
-                {actionSummary}{typedSummary ? ` ${typedSummary}` : ''}
-            </p>
-        </div>
     </div>
 </NodeWrapper>
+
+<style>
+    /* The same surface the number and time inputs of the other nodes sit on, so
+       the one text box this node has does not read as a control from a different
+       app. */
+    .character-input {
+        background-color: var(--main);
+        color: var(--main-text);
+        transition: background-color 0.3s;
+    }
+
+    .character-input:hover {
+        background-color: var(--main-hover);
+    }
+</style>
