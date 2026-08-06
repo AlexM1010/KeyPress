@@ -99,10 +99,15 @@ The application implements a hybrid architecture with clear separation of concer
 
 ```
 Keypress/
-├── main.go                 # Wails application entry point
-├── app.go                  # Core application logic and Wails bindings
-├── utils/
-│   └── fileutils.go        # File system utilities
+├── main.go                 # Wails application entry point (embeds the frontend)
+├── backend/
+│   ├── run.go              # Wails app options and startup wiring
+│   ├── app.go              # Core application logic and Wails bindings
+│   ├── execution.go        # Flowchart execution engine
+│   ├── persistence.go      # Saving and loading macros
+│   ├── actions_*.go        # Keyboard, mouse, delay and colour actions
+│   └── utils/
+│       └── fileutils.go    # File system utilities
 ├── frontend/
 │   ├── src/
 │   │   ├── routes/         # SvelteKit pages

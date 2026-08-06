@@ -1,0 +1,5 @@
+# Go tooling writes LF and gofmt treats a CRLF file as unformatted, so `gofmt
+# -l` reports the whole file. Left to core.autocrlf (true on Windows) the .go
+# files come back out of a checkout with CRLF and every one of them is flagged.
+# Pinning them here keeps the working tree matching what gofmt produces.
+*.go text eol=lf

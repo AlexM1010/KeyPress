@@ -3,7 +3,7 @@
 // Data structures exchanged with the frontend (flowchart nodes/edges) and the
 // internal task representation derived from them.
 
-package main
+package backend
 
 // Node represents a single node in the flowchart.
 type Node struct {

@@ -3,7 +3,7 @@
 // Handler for the colour node type: block until the pixel at a screen position
 // matches a target colour, or give up after a timeout.
 
-package main
+package backend
 
 import (
 	"fmt"

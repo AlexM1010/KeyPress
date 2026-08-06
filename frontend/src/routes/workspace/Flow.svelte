@@ -31,8 +31,8 @@
     LoadLastFile,
     SaveFile,
     StartExecution,
-  } from "$lib/wailsjs/go/main/App";
-  import { main } from "$lib/wailsjs/go/models";
+  } from "$lib/wailsjs/go/backend/App";
+  import { backend } from "$lib/wailsjs/go/models";
 
   // Nodes
   import { nodeTypes } from "$lib/components/Workspace/customNodes/nodeTypes";
@@ -573,7 +573,7 @@
       saveState = { status: 'saving' };
       const currentFlowData = toObject();
       const savedID = await SaveFile(
-        main.FlowData.createFrom(currentFlowData),
+        backend.FlowData.createFrom(currentFlowData),
         $macroName.trim(),
         $macroID
       );

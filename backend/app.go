@@ -1,6 +1,6 @@
 // app.go
 
-package main
+package backend
 
 import (
 	"context"

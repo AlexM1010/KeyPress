@@ -3,7 +3,7 @@
 // Wails runtime event plumbing: the single place the backend talks to the
 // frontend event bus.
 
-package main
+package backend
 
 import (
 	"log"

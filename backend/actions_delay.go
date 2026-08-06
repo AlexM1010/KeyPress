@@ -2,7 +2,7 @@
 //
 // Handler for the delay node type: fixed and randomized waits.
 
-package main
+package backend
 
 import (
 	"context"

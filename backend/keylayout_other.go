@@ -10,7 +10,7 @@
 // rest. Declining is not a dead end: the caller falls back to typing the
 // character directly, which is layout-independent by construction.
 
-package main
+package backend
 
 import (
 	"fmt"

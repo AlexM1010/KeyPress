@@ -16,7 +16,7 @@
 // Keys with no character of their own - Enter, F5, the arrows - are already the
 // same everywhere, so those are stored by name and kept clearly separate.
 
-package main
+package backend
 
 import (
 	"context"

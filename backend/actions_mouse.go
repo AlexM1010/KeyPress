@@ -3,7 +3,7 @@
 // Handlers for the mouse node types: movement (with optional drag) and
 // clicking/scrolling.
 
-package main
+package backend
 
 import (
 	"fmt"

@@ -19,7 +19,7 @@
 // direction needed to hand the key back to robotgo, whose API names keys by
 // their unshifted character.
 
-package main
+package backend
 
 import (
 	"fmt"

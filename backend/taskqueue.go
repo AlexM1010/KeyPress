@@ -3,7 +3,7 @@
 // The worker pool that drains queued tasks and reports their completion back
 // to the App.
 
-package main
+package backend
 
 import (
 	"context"

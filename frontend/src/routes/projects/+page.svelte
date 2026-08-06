@@ -12,8 +12,8 @@
 	import { base } from '$app/paths';
 	import { FileWarning, Inbox, Loader, Search, SquareDashed, Unplug, X } from 'lucide-svelte';
 
-	import { ListProjects, LoadProject } from '$lib/wailsjs/go/main/App';
-	import type { main } from '$lib/wailsjs/go/models';
+	import { ListProjects, LoadProject } from '$lib/wailsjs/go/backend/App';
+	import type { backend } from '$lib/wailsjs/go/models';
 	import { openMacroInWorkspace } from '$lib/stores/flow';
 	import { describeError } from '$lib/utils/helpers';
 	import { isExpanded } from '$lib/stores/navbar';
@@ -27,7 +27,7 @@
 
 	type ListState =
 		| { status: 'loading' }
-		| { status: 'loaded'; macros: main.ProjectSummary[] }
+		| { status: 'loaded'; macros: backend.ProjectSummary[] }
 		| { status: 'no-runtime' }
 		| { status: 'error'; message: string };
 
@@ -42,7 +42,7 @@
 	 */
 	const hasGoRuntime = (): boolean =>
 		typeof window !== 'undefined' &&
-		Boolean((window as { go?: { main?: { App?: unknown } } }).go?.main?.App);
+		Boolean((window as { go?: { backend?: { App?: unknown } } }).go?.backend?.App);
 
 	let query = '';
 
@@ -102,10 +102,10 @@
 		try {
 			listState = { status: 'loaded', macros: await ListProjects() };
 		} catch (error) {
-			// The generated bindings reach straight into `window.go.main.App`, so
+			// The generated bindings reach straight into `window.go.backend.App`, so
 			// with the frontend served on its own - `npm run dev` in an ordinary
 			// browser - this lands here with a bare "Cannot read properties of
-			// undefined (reading 'main')". That is not a failure to read the
+			// undefined (reading 'backend')". That is not a failure to read the
 			// user's macros, and reporting it as one sends them looking for a
 			// problem with their files; there is simply nothing here to read them
 			// with. Anything else is a real error and keeps its message.

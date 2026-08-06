@@ -7,10 +7,10 @@
 // the macro's id: it is what ListProjects hands out and what LoadProject
 // accepts back.
 
-package main
+package backend
 
 import (
-	"Keypress/utils"
+	"Keypress/backend/utils"
 	"encoding/json"
 	"errors"
 	"fmt"

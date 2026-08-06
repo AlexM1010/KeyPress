@@ -3,7 +3,7 @@
 // Flow execution engine: turns a flowchart into a dependency graph, drives the
 // task queue from it and tracks the overall execution state.
 
-package main
+package backend
 
 import (
 	"context"

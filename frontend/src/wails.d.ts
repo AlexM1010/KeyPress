@@ -9,7 +9,7 @@ export interface WailsRuntime {
 
 // Single consolidated Window interface declaration.
 // The Go bindings themselves are consumed through the generated
-// `$lib/wailsjs/go/main/App` module, so no hand-written `Backend` shape is declared
+// `$lib/wailsjs/go/backend/App` module, so no hand-written `Backend` shape is declared
 // here - only the runtime, which has no generated typings.
 declare global {
     interface Window {

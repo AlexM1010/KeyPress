@@ -3,7 +3,7 @@
 // Dispatch of a queued task to the handler for its node type. The individual
 // handlers live in the actions_*.go files.
 
-package main
+package backend
 
 import (
 	"fmt"
