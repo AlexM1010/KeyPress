@@ -98,23 +98,39 @@
     text-align: right;
 }
 
-/* Skipped-node mark.
-   ------------------
+/* Run marks: the skipped-node mark and the active-node glow.
+   ----------------------------------------------------------
    Nodes a run left out because nothing connects them to the Start node get an
    orange glow so the user can see which branch did nothing, instead of having
-   to match numbered names in the status panel against the canvas.
+   to match numbered names in the status panel against the canvas. The node a
+   run is executing right now gets a glow in its own header colour, so the
+   canvas shows where the run has got to rather than only the status panel
+   saying so.
+
+   Both are the same declaration, because a node can only ever want one of
+   them: `--node-active-glow` is set while a node is executing and
+   `--node-skipped-glow` while a node was left out of the run, and a node that
+   was left out never executes. The nesting only fixes which wins if that ever
+   stops being true - the live mark does.
+
+   They are told apart by shape, not just by colour. The skipped mark draws a
+   solid 2px ring inside its halo; the active glow is halo only. That matters
+   because the Keypress node's own colour is the same orange the skipped mark
+   uses, and the two marks can be on the canvas at the same time on different
+   cards.
 
    The look lives here; the *selection* cannot, because which nodes are marked
    is only known at runtime. Flow.svelte emits a tiny stylesheet that sets
-   `--node-skipped-glow` on the wrappers of the reported ids - see
-   `buildSkippedGlowCss` there. That indirection is the whole point of this
-   rule: nothing is ever written onto the node objects in the store, so
-   `toObject()` - and therefore every save file - is untouched.
+   these properties on the wrappers of the reported ids - see
+   `buildSkippedGlowCss` and `buildActiveGlowCss` there. That indirection is
+   the whole point of this rule: nothing is ever written onto the node objects
+   in the store, so `toObject()` - and therefore every save file - is
+   untouched.
 
    `border-radius` only shapes the shadow: the wrapper has no background or
    border of its own, and 1rem is the radius of the node card inside it
    (`nodeComponents/NodeWrapper.svelte`), so the ring hugs the card. The
-   fallback keeps unmarked nodes exactly as they were.
+   innermost fallback keeps unmarked nodes exactly as they were.
 
    `transition-property: none` is load-bearing, not tidying. `index.scss`
    transitions `box-shadow` on every element (`*`), and in the Chromium the app
@@ -128,7 +144,7 @@
    noticed the instant a run reports it anyway. */
 .svelte-flow__node {
     border-radius: 1rem;
-    box-shadow: var(--node-skipped-glow, none);
+    box-shadow: var(--node-active-glow, var(--node-skipped-glow, none));
     transition-property: none;
 }
 

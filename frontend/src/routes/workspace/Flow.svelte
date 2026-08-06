@@ -165,6 +165,31 @@
   /** Shown when a reported node is not in the graph the run was started from. */
   const UNKNOWN_NODE_LABEL = "Unknown node";
 
+  /**
+   * The glow colour a node shows while it is running, keyed by the same node
+   * type as `NODE_TYPE_TITLES`.
+   *
+   * Each value is the hue of that node's own header gradient - Start and Delay
+   * are blue, the two mouse nodes green, Keypress orange, Wait For Color
+   * indigo - so a running card lights up in its own colour rather than in one
+   * shared highlight. The gradients themselves are Tailwind classes on the node
+   * components (`export let color`), which is no use as a shadow colour, so the
+   * hues are named here as the `--node-glow-*` custom properties `index.scss`
+   * defines. As with the titles above, the node components are the source of
+   * truth: when one changes colour, this table follows.
+   */
+  const NODE_TYPE_GLOWS: Record<string, string> = {
+    StartNode: "--node-glow-blue",
+    DelayNode: "--node-glow-blue",
+    MouseClickNode: "--node-glow-green",
+    MouseMoveNode: "--node-glow-green",
+    ColorPickerNode: "--node-glow-indigo",
+    KeyPressNode: "--node-glow-orange",
+  };
+
+  /** For a node type that is not in the table above. */
+  const DEFAULT_NODE_GLOW = "--node-glow-neutral";
+
   // Skipped-node highlight
   // ----------------------
   // Ids the backend reported as connected but unreachable from Start on the
@@ -217,6 +242,70 @@
   }
 
   $: skippedGlowCss = buildSkippedGlowCss(skippedNodeIds);
+
+  // Active-node highlight
+  // ---------------------
+  // The nodes the backend currently has in flight, tracked the same way and for
+  // the same reasons as the skipped ids above: a stylesheet keyed on `data-id`,
+  // never a marker written onto the node objects, so the graph the user saves
+  // is untouched.
+  //
+  // A list rather than a single id because the run is concurrent - the worker
+  // pool in `taskqueue.go` runs several tasks at once, so two branches of a
+  // flow really can be lit at the same time, and that is worth seeing.
+  let activeNodeIds: string[] = [];
+
+  /**
+   * id -> the `--node-glow-*` property that node lights up in, frozen for the
+   * duration of one run.
+   *
+   * Built from the same snapshot as `nodeLabels`, for the same reason: it is
+   * the graph the backend is about to be given, so every node it can report on
+   * has an entry and no node changes colour half-way through a run because the
+   * canvas was edited underneath it.
+   */
+  let nodeGlows = new Map<string, string>();
+
+  /**
+   * CSS lighting up the nodes that are executing, or "" when none are.
+   *
+   * Shaped exactly like `buildSkippedGlowCss` - same `.flow-container` scope,
+   * same id filter, same handing-off to FlowStyle.css through a custom property
+   * - but grouped by colour rather than emitted per id, because most runs light
+   * one or two nodes of a handful of colours and a selector list per colour is
+   * the smaller stylesheet.
+   *
+   * The glow is a halo with no solid ring, which is what distinguishes it from
+   * the skipped mark; see the rule in FlowStyle.css.
+   *
+   * `glows` is a parameter rather than a read of `nodeGlows`, so the reactive
+   * statement below rebuilds the stylesheet when a new run recolours the graph
+   * and not only when the set of lit ids changes.
+   */
+  function buildActiveGlowCss(
+    nodeIds: string[],
+    glows: Map<string, string>
+  ): string {
+    const byGlow = new Map<string, string[]>();
+    for (const id of nodeIds) {
+      if (!SELECTOR_SAFE_NODE_ID.test(id)) continue;
+      const glow = glows.get(id) ?? DEFAULT_NODE_GLOW;
+      const selectors = byGlow.get(glow);
+      const selector = `.flow-container .svelte-flow__node[data-id="${id}"]`;
+      if (selectors) selectors.push(selector);
+      else byGlow.set(glow, [selector]);
+    }
+
+    let css = "";
+    for (const [glow, selectors] of byGlow) {
+      css +=
+        `${selectors.join(",")}{--node-active-glow:` +
+        `0 0 26px 8px var(${glow})}`;
+    }
+    return css;
+  }
+
+  $: activeGlowCss = buildActiveGlowCss(activeNodeIds, nodeGlows);
 
   /**
    * The subset of a node this file needs to label it. Deliberately structural
@@ -471,21 +560,54 @@
     return nodeIds.slice().sort((a, b) => step(a) - step(b) || a.localeCompare(b));
   }
 
+  $: hasError = statusMessages.some((msg) => msg.type === "error");
+  $: hasWarning = statusMessages.some((msg) => msg.type === "warning");
+  $: hasSuccess = statusMessages.some(
+    (msg) =>
+      msg.type === "success" && msg.message.includes("Flow execution completed")
+  );
+
   // Computed property to determine the current execution status and icon
   $: executionStatus = (() => {
-    const hasError = statusMessages.some((msg) => msg.type === "error");
-    const hasWarning = statusMessages.some((msg) => msg.type === "warning");
-    const hasSuccess = statusMessages.some(
-      (msg) =>
-        msg.type === "success" && msg.message.includes("Flow execution completed")
-    );
-
     if (isExecuting) return { icon: Loader, color: "text-blue-500" };
     if (hasError) return { icon: X, color: "text-red-500" };
     if (hasWarning) return { icon: TriangleAlert, color: "text-yellow-500" };
     if (hasSuccess) return { icon: Play, color: "text-green-500" };
     return { icon: Play, color: "text-foreground" };
   })();
+
+  /**
+   * How long the run button holds the alert glyph after a run that errored or
+   * warned. Long enough to be read without watching for it, short enough that
+   * the button goes back to looking like something you press.
+   */
+  const RUN_ALERT_HOLD_MS = 5000;
+
+  // The button is a control first and a status light second, so it only borrows
+  // the alert glyph for a moment. Nothing is lost by handing it back to Play:
+  // the status panel keeps its own icon on the failure, and its messages stay
+  // until the next run clears them.
+  let isRunAlertHeld = false;
+  let runAlertTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $: hasRunAlert = !isExecuting && (hasError || hasWarning);
+
+  $: {
+    clearTimeout(runAlertTimer);
+    if (hasRunAlert) {
+      isRunAlertHeld = true;
+      runAlertTimer = setTimeout(() => (isRunAlertHeld = false), RUN_ALERT_HOLD_MS);
+    } else {
+      isRunAlertHeld = false;
+    }
+  }
+
+  $: runButtonStatus =
+    hasRunAlert && !isRunAlertHeld
+      ? { icon: Play, color: "text-foreground" }
+      : executionStatus;
+
+  onDestroy(() => clearTimeout(runAlertTimer));
 
   // Custom edge types
   const edgeTypes = {
@@ -509,8 +631,11 @@
       isSuccess = false;
       statusMessages = [];
       // Last run's marks go with last run's messages: the canvas must never
-      // show a glow that the status panel no longer explains.
+      // show a glow that the status panel no longer explains. The active glow
+      // is cleared as well - a run that ended without a terminal event (the app
+      // was left mid-run) must not leave a node looking like it is still going.
       skippedNodeIds = [];
+      clearActiveNodes();
 
       // Get the current flow data as an object
       const currentFlowData = toObject();
@@ -525,10 +650,17 @@
         return;
       }
 
-      // Label every node before the backend can report on any of them: this is
-      // the same snapshot that is about to be sent, so the labels match the run
-      // exactly and stay fixed even if the user edits the canvas mid-run.
+      // Label and colour every node before the backend can report on any of
+      // them: this is the same snapshot that is about to be sent, so both match
+      // the run exactly and stay fixed even if the user edits the canvas
+      // mid-run.
       nodeLabels = buildNodeLabels(currentFlowData.nodes, currentFlowData.edges);
+      nodeGlows = new Map<string, string>(
+        currentFlowData.nodes.map((node): [string, string] => [
+          node.id,
+          NODE_TYPE_GLOWS[node.type ?? ""] ?? DEFAULT_NODE_GLOW,
+        ])
+      );
 
       // Start execution via the Go backend
       const response = await StartExecution(JSON.stringify(currentFlowData));
@@ -742,12 +874,105 @@
     statusMessages = [...statusMessages, msg];
   }
 
+  /**
+   * Shortest time a node's glow stays on screen.
+   *
+   * Without it most of them would never be seen at all. A keypress or a click
+   * takes a millisecond or two, so its `task-started` and `task-completed`
+   * arrive close enough together to land in the same Svelte update - the glow
+   * would be added and removed without ever being painted, and a flow of quick
+   * actions would light nothing while it ran. Holding each one briefly turns
+   * the run into something the eye can follow across the canvas.
+   *
+   * Short enough not to lie about it: a node that is still glowing when the
+   * next one lights up is only ever a few frames behind, and the status panel
+   * carries the exact sequence for anyone who needs it.
+   */
+  const MIN_ACTIVE_GLOW_MS = 220;
+
+  /** When each currently-lit node was reported as started. */
+  const activeSince = new Map<string, number>();
+
+  /** Glows waiting out `MIN_ACTIVE_GLOW_MS` before they go out. */
+  const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Lights a node up on the canvas for as long as the backend is running it. */
+  function markNodeActive(nodeId: string) {
+    // A node that is running again while the last run's glow was still being
+    // held keeps the glow and starts its hold over.
+    const pending = idleTimers.get(nodeId);
+    if (pending !== undefined) {
+      clearTimeout(pending);
+      idleTimers.delete(nodeId);
+    }
+
+    activeSince.set(nodeId, Date.now());
+    if (activeNodeIds.includes(nodeId)) return;
+    activeNodeIds = [...activeNodeIds, nodeId];
+  }
+
+  /** Takes a node's glow off the canvas, hold or no hold. */
+  function removeActiveNode(nodeId: string) {
+    activeSince.delete(nodeId);
+    activeNodeIds = activeNodeIds.filter((id) => id !== nodeId);
+  }
+
+  /**
+   * Ends a node's glow, once it has been on screen long enough to have been
+   * seen.
+   *
+   * A failing task reports `task-error` and is then still followed by
+   * `task-completed`, so this is called twice for it; the second call finds the
+   * hold already running - or the glow already gone - and does nothing.
+   */
+  function markNodeIdle(nodeId: string) {
+    if (idleTimers.has(nodeId)) return;
+
+    const since = activeSince.get(nodeId);
+    // No start time means nothing lit it, so there is nothing to hold.
+    const shown = since === undefined ? MIN_ACTIVE_GLOW_MS : Date.now() - since;
+    if (shown >= MIN_ACTIVE_GLOW_MS) {
+      removeActiveNode(nodeId);
+      return;
+    }
+
+    idleTimers.set(
+      nodeId,
+      setTimeout(() => {
+        idleTimers.delete(nodeId);
+        removeActiveNode(nodeId);
+      }, MIN_ACTIVE_GLOW_MS - shown)
+    );
+  }
+
+  /**
+   * Puts every glow out at once, on each of the events that end a run, and on
+   * anything that replaces the graph.
+   *
+   * Belt and braces over `markNodeIdle`, and worth it: a run that is stopped
+   * mid-task, or that ends on an error raised outside a task, can leave a node
+   * that reported `task-started` without ever reporting anything else. A glow
+   * left burning on a finished run would say the flow is still going.
+   *
+   * The minimum hold is deliberately cut short here rather than waited out. The
+   * run is over, and a card still lit after that says otherwise.
+   */
+  function clearActiveNodes() {
+    for (const timer of idleTimers.values()) clearTimeout(timer);
+    idleTimers.clear();
+    activeSince.clear();
+    activeNodeIds = [];
+  }
+
   // Set up event listeners
   function setupEventListeners() {
     // The backend reports tasks by node id, which is a random decimal and
     // meaningless on screen. Every message below names the node the way the
     // canvas does and keeps the id in `nodeId` for the panel's tooltip.
     window.runtime.EventsOn("task-started", (taskId: string) => {
+      // Lit on the canvas as well as named here, for the same reason the
+      // skipped nodes are: the panel says which node, the glow says where.
+      markNodeActive(taskId);
       addStatusMessage({
         id: `task-started-${taskId}`,
         type: "info",
@@ -757,6 +982,7 @@
     });
 
     window.runtime.EventsOn("task-completed", (taskId: string) => {
+      markNodeIdle(taskId);
       addStatusMessage({
         id: `task-completed-${taskId}`,
         type: "success",
@@ -769,6 +995,7 @@
       "task-error",
       (payload: { taskID: string; error: string }) => {
         isExecuting = false;
+        markNodeIdle(payload.taskID);
         addStatusMessage({
           id: `task-error-${payload.taskID}`,
           type: "error",
@@ -780,6 +1007,7 @@
 
     window.runtime.EventsOn("execution-error", (errorMsg: string) => {
       isExecuting = false;
+      clearActiveNodes();
       addStatusMessage({
         id: `exec-error-${Date.now()}`,
         type: "error",
@@ -789,6 +1017,7 @@
 
     window.runtime.EventsOn("execution-stopped", () => {
       isExecuting = false;
+      clearActiveNodes();
       addStatusMessage({
         id: `exec-stopped-${Date.now()}`,
         type: "warning",
@@ -818,6 +1047,7 @@
     // could ever start - a loop in the connections, in practice.
     window.runtime.EventsOn("execution-stalled", (nodeIds: string[]) => {
       isExecuting = false;
+      clearActiveNodes();
       const stuck = inFlowOrder(nodeIds).map(nodeLabel);
       addStatusMessage({
         id: `exec-stalled-${Date.now()}`,
@@ -831,6 +1061,7 @@
     window.runtime.EventsOn("execution-completed", () => {
       isExecuting = false;
       isSuccess = true;
+      clearActiveNodes();
       addStatusMessage({
         id: `exec-completed-${Date.now()}`,
         type: "success",
@@ -870,11 +1101,12 @@
       }
 
       // A different graph is about to replace this one, so the previous graph's
-      // skip marks go with it. Ids are per-graph and the highlight matches on
+      // run marks go with it. Ids are per-graph and the highlights match on
       // them, so a stale mark could not land on a node of the new macro anyway
-      // - but leaving the list populated would keep a stylesheet in <head>
+      // - but leaving the lists populated would keep a stylesheet in <head>
       // describing nodes that no longer exist.
       skippedNodeIds = [];
+      clearActiveNodes();
 
       // Adopts the graph, the name and the id, and marks the workspace
       // hydrated. `data` is a fresh parse from the backend and nothing else
@@ -954,6 +1186,9 @@
   onDestroy(() => {
     clearInterval(dirtyPollTimer);
     clearTimeout(saveSuccessTimer);
+    // The glows go with the component, but the timers holding them would
+    // outlive it and write to a destroyed component's state.
+    clearActiveNodes();
 
     // One last look, so the flag the macro list reads describes the canvas as
     // the user left it rather than as it was up to half a second earlier.
@@ -968,10 +1203,11 @@
   });
 </script>
 
-<!-- The skipped-node marks. A stylesheet rather than a class on the nodes, so
-     the graph data - and therefore every save file - stays exactly as the user
-     left it; see `buildSkippedGlowCss`. Emptying `skippedNodeIds` empties the
-     rule, and Svelte removes the element with the component.
+<!-- The run marks: which nodes a run skipped, and which it is executing right
+     now. Stylesheets rather than classes on the nodes, so the graph data - and
+     therefore every save file - stays exactly as the user left it; see
+     `buildSkippedGlowCss` and `buildActiveGlowCss`. Emptying the id lists
+     empties the rules, and Svelte removes the elements with the component.
 
      `<svelte:element>` rather than a written-out tag: a literal style element
      here would be taken for the component's own style block. Its content is a
@@ -979,6 +1215,9 @@
 <svelte:head>
   {#if skippedGlowCss}
     <svelte:element this="style">{skippedGlowCss}</svelte:element>
+  {/if}
+  {#if activeGlowCss}
+    <svelte:element this="style">{activeGlowCss}</svelte:element>
   {/if}
 </svelte:head>
 
@@ -1046,8 +1285,8 @@
               disabled={isExecuting}
             >
               <svelte:component
-                this={executionStatus.icon}
-                class="flow-icon {executionStatus.color}"
+                this={runButtonStatus.icon}
+                class="flow-icon {runButtonStatus.color}"
                 style={isExecuting ? "animation: spin 1s linear infinite" : ""}
               />
             </button>

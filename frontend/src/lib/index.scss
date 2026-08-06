@@ -67,6 +67,35 @@ html { font-family: "Inter", "system-ui"; }
 	--skipped-glow-dark: #fb923c; /* orange-400 */
 	--skipped-glow-soft-dark: rgba(251, 146, 60, 0.55);
 
+	/* The node currently being executed by a running flow.
+	   One tone per hue, translucent: the mark is a halo only, with no solid ring
+	   of the kind the skipped mark draws. That difference in shape is what tells
+	   the two apart, and it has to, because the Keypress node's own colour is the
+	   same orange the skipped mark uses - the two can be on screen at once, on
+	   different cards.
+
+	   A hue per node colour, so a running card glows in the colour of its own
+	   header (`--node-glow-*` here, mapped to node types in `Flow.svelte`).
+	   Per-theme for the same reason the skipped tones are: the 400s wash out on
+	   the light canvas, the 600s go muddy on the near-black one. */
+	--node-glow-blue-light: rgba(37, 99, 235, 0.45); /* blue-600 */
+	--node-glow-blue-dark: rgba(96, 165, 250, 0.55); /* blue-400 */
+
+	--node-glow-green-light: rgba(22, 163, 74, 0.45); /* green-600 */
+	--node-glow-green-dark: rgba(74, 222, 128, 0.55); /* green-400 */
+
+	--node-glow-orange-light: rgba(234, 88, 12, 0.45); /* orange-600 */
+	--node-glow-orange-dark: rgba(251, 146, 60, 0.55); /* orange-400 */
+
+	--node-glow-indigo-light: rgba(79, 70, 229, 0.45); /* indigo-600 */
+	--node-glow-indigo-dark: rgba(129, 140, 248, 0.55); /* indigo-400 */
+
+	/* For a node type with no colour of its own here - one added to the app
+	   without being added to the table in `Flow.svelte`. Neutral on purpose: it
+	   should read as "running" without claiming to be any node's colour. */
+	--node-glow-neutral-light: rgba(71, 85, 105, 0.45); /* slate-600 */
+	--node-glow-neutral-dark: rgba(148, 163, 184, 0.55); /* slate-400 */
+
 	--dark-0-60: rgba(0, 0, 0, 0.6);
 	--light-0-60: rgba(255, 255, 255, 0.6);
 
@@ -146,6 +175,12 @@ body {
 
 	--skipped-glow: var(--skipped-glow-dark);
 	--skipped-glow-soft: var(--skipped-glow-soft-dark);
+
+	--node-glow-blue: var(--node-glow-blue-dark);
+	--node-glow-green: var(--node-glow-green-dark);
+	--node-glow-orange: var(--node-glow-orange-dark);
+	--node-glow-indigo: var(--node-glow-indigo-dark);
+	--node-glow-neutral: var(--node-glow-neutral-dark);
 }
 
 :root[data-theme='light'] {
@@ -188,6 +223,12 @@ body {
 
 	--skipped-glow: var(--skipped-glow-light);
 	--skipped-glow-soft: var(--skipped-glow-soft-light);
+
+	--node-glow-blue: var(--node-glow-blue-light);
+	--node-glow-green: var(--node-glow-green-light);
+	--node-glow-orange: var(--node-glow-orange-light);
+	--node-glow-indigo: var(--node-glow-indigo-light);
+	--node-glow-neutral: var(--node-glow-neutral-light);
 }
 
 .container {
