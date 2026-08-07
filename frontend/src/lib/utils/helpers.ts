@@ -22,20 +22,23 @@ export const describeError = (error: unknown): string => {
 };
 
 /**
- * Whether the Go side of the app is actually there.
+ * Whether a failed call failed because the Go side was not reachable at all.
  *
- * The generated bindings reach straight into `window.go.backend.App` with no
- * check of their own, so when it is missing they throw a bare "Cannot read
- * properties of undefined (reading 'App')" - a message about the shape of an
- * object, handed to someone who was trying to save their work.
+ * Wails v3 calls the backend over HTTP rather than through an object the
+ * runtime hangs off `window`, so "is Go there?" can no longer be answered up
+ * front - it is only knowable from how a call failed. With nothing listening,
+ * `fetch` rejects with a TypeError long before any Go code is reached, and that
+ * is what this recognises.
  *
- * Used to explain a failure, never to pre-empt one: calls are always attempted,
- * so a runtime that turns up in some way this check does not recognise still
- * gets to work.
+ * Deliberately loose about the wording: browsers phrase this differently
+ * ("Failed to fetch", "NetworkError when attempting to fetch resource", "Load
+ * failed"), and a missed match only costs a less specific message, never a
+ * wrong one.
  */
-export const hasGoRuntime = (): boolean =>
-	typeof window !== 'undefined' &&
-	Boolean((window as { go?: { backend?: { App?: unknown } } }).go?.backend?.App);
+export const isBackendUnreachable = (error: unknown): boolean => {
+	if (error instanceof TypeError) return true;
+	return /failed to fetch|networkerror|load failed/i.test(describeError(error));
+};
 
 /**
  * Text for a failed call to the backend.
@@ -47,6 +50,6 @@ export const hasGoRuntime = (): boolean =>
  * nothing about their macro will fix it, so the message says where to look.
  */
 export const describeBackendError = (error: unknown): string =>
-	hasGoRuntime()
-		? describeError(error)
-		: 'Not connected to the KeyPress backend. The desktop app has to be running the current build - restart it and try again.';
+	isBackendUnreachable(error)
+		? 'Not connected to the KeyPress backend. The desktop app has to be running the current build - restart it and try again.'
+		: describeError(error);

@@ -15,38 +15,70 @@ import (
 	"strings"
 )
 
-// StartExecution receives the flowchart data and starts execution.
+// StartExecution receives the flowchart data and starts execution. It is what
+// the workspace calls to run the graph the user currently has on the canvas,
+// saved or not.
 func (a *App) StartExecution(flow string) error {
+	var flowData FlowData
+	if err := json.Unmarshal([]byte(flow), &flowData); err != nil {
+		log.Printf("Failed to unmarshal flowchart: %v", err)
+		return fmt.Errorf("invalid flowchart data: %w", err)
+	}
+	return a.startFlow(flowData)
+}
+
+// RunMacro loads a saved macro by id and runs it, without the caller having to
+// hold the graph. It is what the tray menu and the global hotkeys use: neither
+// has a frontend to get the flowchart from, and both have to work with the
+// window closed.
+//
+// It is bound to the frontend as well, so the projects list can run a macro
+// without opening it in the workspace first.
+func (a *App) RunMacro(id string) error {
+	flowData, err := a.LoadProject(id)
+	if err != nil {
+		log.Printf("RunMacro %q: %v", id, err)
+		return err
+	}
+
+	if err := a.startFlow(*flowData); err != nil {
+		log.Printf("RunMacro %q: %v", id, err)
+		return err
+	}
+
+	// The workspace may be showing a different macro - or nothing at all, if
+	// the window is closed - so tell it which macro these task events belong
+	// to rather than let it assume they are the graph on the canvas.
+	a.emitEvent("macro-started", MacroRun{ID: flowData.ID, Name: flowData.Name})
+	return nil
+}
+
+// startFlow runs a flowchart. Both entry points funnel through here so the
+// execution state, the panic guard and the graph setup have exactly one
+// implementation.
+func (a *App) startFlow(flowData FlowData) error {
 	a.execMutex.Lock()
 	defer a.execMutex.Unlock()
 
 	if a.isExecuting {
-		log.Println("StartExecution called but execution is already in progress")
+		log.Println("startFlow called but execution is already in progress")
 		return errors.New("execution already in progress")
 	}
-	a.isExecuting = true
+	a.setExecutingLocked(true)
 	log.Println("Execution started")
 	defer func() {
 		if r := recover(); r != nil {
 			// execMutex is still held here (this defer runs before the
 			// deferred Unlock), so use the locked variant.
 			a.setExecutingLocked(false)
-			log.Printf("Recovered from panic in StartExecution: %v", r)
+			log.Printf("Recovered from panic in startFlow: %v", r)
 			a.emitEvent("execution-error", fmt.Sprintf("panic: %v", r))
 		}
 	}()
 
-	var flowData FlowData
-	err := json.Unmarshal([]byte(flow), &flowData)
-	if err != nil {
-		a.isExecuting = false
-		log.Printf("Failed to unmarshal flowchart: %v", err)
-		return fmt.Errorf("invalid flowchart data: %w", err)
-	}
-
 	// Validate flowchart
 	if len(flowData.Nodes) == 0 {
-		a.isExecuting = false
+		a.setExecutingLocked(false)
 		log.Println("Flowchart validation failed: no nodes found")
 		return errors.New("flowchart must contain at least one node")
 	}
@@ -61,8 +93,8 @@ func (a *App) StartExecution(flow string) error {
 	// built from the graph.
 	startNode, err := a.findStartNode(flowData.Nodes)
 	if err != nil {
-		a.isExecuting = false
-		log.Printf("StartExecution failed: %v", err)
+		a.setExecutingLocked(false)
+		log.Printf("startFlow failed: %v", err)
 		return err
 	}
 
@@ -462,6 +494,7 @@ func (a *App) setExecuting(state bool) {
 	a.isExecuting = state
 	a.execMutex.Unlock()
 	log.Printf("Execution state set to: %v", state)
+	a.tray.setExecuting(state)
 }
 
 // setExecutingLocked updates the execution state and must only be called with
@@ -470,6 +503,9 @@ func (a *App) setExecuting(state bool) {
 func (a *App) setExecutingLocked(state bool) {
 	a.isExecuting = state
 	log.Printf("Execution state set to: %v", state)
+	// Safe under execMutex: the tray only touches its own menu items and never
+	// calls back into the execution engine.
+	a.tray.setExecuting(state)
 }
 
 // GetIsExecuting returns the current execution state.

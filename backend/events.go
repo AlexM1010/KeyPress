@@ -7,19 +7,21 @@ package backend
 
 import (
 	"log"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // emitEvent emits an event to the frontend.
 //
-// a.ctx is only set in startup. The Wails runtime reacts to a nil context with
-// log.Fatalf, which would terminate the whole process, so drop the event
-// instead: there is no frontend listening before startup anyway.
+// a.wails is only set by attach, just before the application runs, and the
+// Wails event manager is not usable before that - so drop the event instead of
+// dereferencing a nil application. Nothing is listening that early anyway.
+//
+// Note that an event emitted while the window is hidden is not lost: the
+// webview is still alive behind it, so a macro started from the tray or a
+// hotkey lights its nodes up exactly as it would with the window on screen.
 func (a *App) emitEvent(event string, payload interface{}) {
-	if a.ctx == nil {
-		log.Printf("Dropping event %q: frontend runtime not initialized yet", event)
+	if a.wails == nil {
+		log.Printf("Dropping event %q: application not initialized yet", event)
 		return
 	}
-	runtime.EventsEmit(a.ctx, event, payload)
+	a.wails.Event.Emit(event, payload)
 }

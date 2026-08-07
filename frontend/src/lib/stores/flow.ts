@@ -238,15 +238,20 @@ export function serializeMacro(
 export type StoredNode = {
 	id: string;
 	type: string;
-	data?: Record<string, unknown>;
-	position?: { x?: number; y?: number };
+	data?: Record<string, unknown> | null;
+	position?: { x?: number; y?: number } | null;
 };
 
+// `null` as well as absent: Wails v3 types a Go slice as `T[] | null`, because
+// that is what an empty or omitted JSON array actually arrives as. v2's
+// generated classes hid that behind a constructor; the plain interfaces v3
+// generates do not, and a macro saved with no edges really does come back with
+// `edges: null`.
 export type StoredFlowData = {
 	id?: string;
 	name?: string;
-	nodes?: StoredNode[];
-	edges?: Edge[];
+	nodes?: StoredNode[] | null;
+	edges?: Edge[] | null;
 };
 
 /**
@@ -254,7 +259,7 @@ export type StoredFlowData = {
  * expects. The Go model types a position as a loose number map, so this is what
  * turns a file off disk into a graph.
  */
-function toFlowNodes(nodes: StoredNode[] | undefined): FlowNode[] {
+function toFlowNodes(nodes: StoredNode[] | undefined | null): FlowNode[] {
 	return (nodes ?? []).map((node) => ({
 		id: node.id,
 		type: node.type,

@@ -21,10 +21,10 @@
 		X
 	} from 'lucide-svelte';
 
-	import { ListProjects, LoadProject } from '$lib/wailsjs/go/backend/App';
-	import type { backend } from '$lib/wailsjs/go/models';
+	import { App } from '$lib/bindings/Keypress/backend';
+	import type { ProjectSummary } from '$lib/bindings/Keypress/backend';
 	import { openMacroInWorkspace, isMacroDirty, macroName } from '$lib/stores/flow';
-	import { describeError, hasGoRuntime } from '$lib/utils/helpers';
+	import { describeError, isBackendUnreachable } from '$lib/utils/helpers';
 
 	import TabTitle from '$lib/components/Projects/TabTitle.svelte';
 	import MacroCard from '$lib/components/Projects/MacroCard.svelte';
@@ -35,17 +35,16 @@
 
 	type ListState =
 		| { status: 'loading' }
-		| { status: 'loaded'; macros: backend.ProjectSummary[] }
+		| { status: 'loaded'; macros: ProjectSummary[] }
 		| { status: 'no-runtime' }
 		| { status: 'error'; message: string };
 
 	let listState: ListState = { status: 'loading' };
 
-	// `hasGoRuntime` is shared with the workspace (`$lib/utils/helpers`), which
-	// needs the same distinction when a save fails. It explains a failure and
-	// never pre-empts one: the listing is always attempted, so a runtime that
-	// turns up in some way the check does not recognise still gets to work. See
-	// `onMount`.
+	// `isBackendUnreachable` is shared with the workspace (`$lib/utils/helpers`),
+	// which needs the same distinction when a save fails. It explains a failure
+	// and never pre-empts one: the listing is always attempted, and only the way
+	// it failed decides which of these states we land in. See `onMount`.
 
 	let query = '';
 
@@ -124,7 +123,13 @@
 		openState = { status: 'opening', id };
 
 		try {
-			openMacroInWorkspace(await LoadProject(id));
+			const macro = await App.LoadProject(id);
+			// The binding is typed as nullable because Go returns a pointer, but
+			// LoadProject only ever returns nil alongside an error - which the
+			// catch below has. Treat a null anyway rather than hand the workspace
+			// something it would render as an empty canvas without saying why.
+			if (!macro) throw new Error(`Macro "${id}" could not be read.`);
+			openMacroInWorkspace(macro);
 			// The workspace is the root route; there is no URL that carries the
 			// macro, which is why the graph is put in the stores first.
 			await goto(`${base}/`);
@@ -143,18 +148,18 @@
 
 	onMount(async () => {
 		try {
-			listState = { status: 'loaded', macros: await ListProjects() };
+			listState = { status: 'loaded', macros: (await App.ListProjects()) ?? [] };
 		} catch (error) {
-			// The generated bindings reach straight into `window.go.backend.App`,
-			// so with the frontend served on its own - `npm run dev` in an ordinary
-			// browser - this lands here with a bare "Cannot read properties of
-			// undefined (reading 'backend')". That is not a failure to read the
-			// user's macros, and reporting it as one sends them looking for a
-			// problem with their files; there is simply nothing here to read them
-			// with. Anything else is a real error and keeps its message.
-			listState = hasGoRuntime()
-				? { status: 'error', message: describeError(error) }
-				: { status: 'no-runtime' };
+			// The bindings call the Go side over HTTP, so with the frontend served
+			// on its own - `npm run dev` in an ordinary browser - nothing answers
+			// and this lands here with a bare "Failed to fetch". That is not a
+			// failure to read the user's macros, and reporting it as one sends them
+			// looking for a problem with their files; there is simply nothing here
+			// to read them with. Anything else is a real error and keeps its
+			// message.
+			listState = isBackendUnreachable(error)
+				? { status: 'no-runtime' }
+				: { status: 'error', message: describeError(error) };
 		}
 	});
 </script>
@@ -270,6 +275,7 @@
 					nodeCount={macro.nodeCount}
 					edgeCount={macro.edgeCount}
 					modifiedAt={macro.modifiedAt}
+					hotkey={macro.hotkey}
 					opening={isOpening(openState, macro.id)}
 					on:click={() => requestOpen({ id: macro.id, name: macro.name })}
 				/>

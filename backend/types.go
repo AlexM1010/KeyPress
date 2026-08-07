@@ -57,6 +57,20 @@ type ProjectSummary struct {
 	// It is deliberately not a time.Time: Wails maps that to an untyped
 	// field in the generated models, and the frontend bans `any`.
 	ModifiedAt string `json:"modifiedAt"`
+
+	// Hotkey is the system-wide shortcut that runs this macro, empty when it
+	// has none. It is stored in the settings file rather than in the macro, so
+	// it is filled in here from there - see App.hotkeyFor.
+	Hotkey string `json:"hotkey"`
+}
+
+// MacroRun identifies the macro behind a run that the workspace did not start
+// itself. It is the payload of the "macro-started" event, which the tray and
+// the global hotkeys emit so the frontend can tell whose task events these are
+// - it may have a different macro open, or no window on screen at all.
+type MacroRun struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // Task represents a single executable task.

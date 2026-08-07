@@ -3,3 +3,11 @@ node_modules
 frontend/build
 export.md
 .kiro/
+
+# Wails v3 build output. `bin/` is where the Taskfile puts the executable
+# (v2 used build/bin), `.task` is go-task's up-to-date checksum cache, and the
+# .syso is the generated Windows resource file - icon, manifest and version
+# info - rebuilt from build/windows on every build.
+bin
+.task
+*.syso

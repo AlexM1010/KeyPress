@@ -1,18 +1,7 @@
 export { };
 
-// Define the Wails runtime interface
-export interface WailsRuntime {
-    EventsOn: (eventName: string, callback: (...args: any[]) => void) => void;
-    EventsOff: (eventName: string) => void;
-    EventsEmit(eventName: string, ...data: any[]): void;
-}
-
-// Single consolidated Window interface declaration.
-// The Go bindings themselves are consumed through the generated
-// `$lib/wailsjs/go/backend/App` module, so no hand-written `Backend` shape is declared
-// here - only the runtime, which has no generated typings.
-declare global {
-    interface Window {
-        runtime: WailsRuntime;
-    }
-}
+// Wails v3 has no `window.runtime`: the runtime is the `@wailsio/runtime` npm
+// package, which ships its own typings, and the Go bindings are the generated
+// modules under `$lib/bindings`. Both are typed at their source, so there is
+// nothing left for this file to declare - it stays only because SvelteKit
+// picks up ambient declarations from `src`, and a future one belongs here.

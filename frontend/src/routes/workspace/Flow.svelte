@@ -28,15 +28,11 @@
     type FlowNode,
   } from "$lib/stores/flow";
   import { onLayout } from "$lib/utils/autoLayout";
-  import { describeBackendError, hasGoRuntime } from "$lib/utils/helpers";
+  import { describeBackendError, isBackendUnreachable } from "$lib/utils/helpers";
 
   // Generated Wails bindings for the Go backend
-  import {
-    LoadLastFile,
-    SaveFile,
-    StartExecution,
-  } from "$lib/wailsjs/go/backend/App";
-  import { backend } from "$lib/wailsjs/go/models";
+  import { App } from "$lib/bindings/Keypress/backend";
+  import { Events } from "@wailsio/runtime";
 
   // Nodes
   import { nodeTypes } from "$lib/components/Workspace/customNodes/nodeTypes";
@@ -663,7 +659,7 @@
       );
 
       // Start execution via the Go backend
-      const response = await StartExecution(JSON.stringify(currentFlowData));
+      const response = await App.StartExecution(JSON.stringify(currentFlowData));
 
       console.log("Flow execution started:", response);
       addStatusMessage({
@@ -789,8 +785,32 @@
       // now, this string is exactly the bytes the call below sends.
       const sentSnapshot = serializeMacro(name, currentFlowData.nodes, currentFlowData.edges);
 
-      const savedID = await SaveFile(
-        backend.FlowData.createFrom(currentFlowData),
+      // v3's generated models are plain interfaces rather than v2's classes, so
+      // there is no `createFrom` to run the canvas object through. Mapped field
+      // by field rather than cast, because Svelte Flow's types really are looser
+      // than the Go structs and a cast would compile while sending values Go
+      // cannot take: an unused handle is `null` on an edge, and a node's `type`
+      // is optional. Both are narrowed here, once, at the boundary.
+      //
+      // `data` and `position` stay by reference, as they were before: this runs
+      // after `sentSnapshot` is taken, which is what makes that ordering matter.
+      const savedID = await App.SaveFile(
+        {
+          nodes: currentFlowData.nodes.map((node) => ({
+            id: node.id,
+            type: node.type ?? "",
+            data: node.data,
+            position: node.position,
+          })),
+          edges: currentFlowData.edges.map((edge) => ({
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            sourceHandle: edge.sourceHandle ?? undefined,
+            targetHandle: edge.targetHandle ?? undefined,
+            type: edge.type,
+          })),
+        },
         name,
         $macroID
       );
@@ -807,10 +827,9 @@
       }, SAVE_SUCCESS_HOLD_MS);
     } catch (error) {
       // `describeBackendError`, not `describeError`: a save that fails because
-      // the Go bindings are not there throws about a missing property of an
-      // object, and putting "Cannot read properties of undefined (reading
-      // 'App')" under the name field tells the user their macro's name is
-      // wrong when it is not.
+      // nothing is listening on the Go side throws a bare "Failed to fetch",
+      // and putting that under the name field tells the user their macro's name
+      // is wrong when it is not.
       const errorMessage = describeBackendError(error);
       // Two surfaces on purpose: the status panel is the established home for
       // backend failures, but it is collapsed by default, and a rejected save
@@ -827,7 +846,7 @@
       // the backend is what refused it, the name is what has to change. Not
       // when the backend never heard the request: pointing at the name field
       // would blame it for a failure it had no part in.
-      if (hasGoRuntime()) nameInput?.focus();
+      if (!isBackendUnreachable(error)) nameInput?.focus();
     }
   }
 
@@ -964,12 +983,26 @@
     activeNodeIds = [];
   }
 
+  // Unsubscribe functions for the backend listeners below, called on destroy.
+  //
+  // This is new in v3 and not housekeeping for its own sake: v2's `EventsOn`
+  // had no per-listener removal, so the listeners simply leaked and a remount
+  // stacked a second set on top. Every one of them writes to this component's
+  // state, so a stale set means a destroyed component being written to on the
+  // next macro run.
+  let eventUnsubscribers: (() => void)[] = [];
+
   // Set up event listeners
+  //
+  // Wails v3 hands every listener one `WailsEvent` and puts what the backend
+  // emitted on its `data`, where v2 spread the payload across the callback's
+  // arguments - hence the `({ data })` on each of these.
   function setupEventListeners() {
     // The backend reports tasks by node id, which is a random decimal and
     // meaningless on screen. Every message below names the node the way the
     // canvas does and keeps the id in `nodeId` for the panel's tooltip.
-    window.runtime.EventsOn("task-started", (taskId: string) => {
+    eventUnsubscribers.push(Events.On("task-started", ({ data }) => {
+      const taskId = data as string;
       // Lit on the canvas as well as named here, for the same reason the
       // skipped nodes are: the panel says which node, the glow says where.
       markNodeActive(taskId);
@@ -979,9 +1012,10 @@
         message: `${nodeLabel(taskId)} started.`,
         nodeId: taskId,
       });
-    });
+    }));
 
-    window.runtime.EventsOn("task-completed", (taskId: string) => {
+    eventUnsubscribers.push(Events.On("task-completed", ({ data }) => {
+      const taskId = data as string;
       markNodeIdle(taskId);
       addStatusMessage({
         id: `task-completed-${taskId}`,
@@ -989,23 +1023,22 @@
         message: `${nodeLabel(taskId)} completed successfully.`,
         nodeId: taskId,
       });
-    });
+    }));
 
-    window.runtime.EventsOn(
-      "task-error",
-      (payload: { taskID: string; error: string }) => {
-        isExecuting = false;
-        markNodeIdle(payload.taskID);
-        addStatusMessage({
-          id: `task-error-${payload.taskID}`,
-          type: "error",
-          message: `${nodeLabel(payload.taskID)} failed: ${payload.error}`,
-          nodeId: payload.taskID,
-        });
-      }
-    );
+    eventUnsubscribers.push(Events.On("task-error", ({ data }) => {
+      const payload = data as { taskID: string; error: string };
+      isExecuting = false;
+      markNodeIdle(payload.taskID);
+      addStatusMessage({
+        id: `task-error-${payload.taskID}`,
+        type: "error",
+        message: `${nodeLabel(payload.taskID)} failed: ${payload.error}`,
+        nodeId: payload.taskID,
+      });
+    }));
 
-    window.runtime.EventsOn("execution-error", (errorMsg: string) => {
+    eventUnsubscribers.push(Events.On("execution-error", ({ data }) => {
+      const errorMsg = data as string;
       isExecuting = false;
       clearActiveNodes();
       addStatusMessage({
@@ -1013,9 +1046,9 @@
         type: "error",
         message: `Flow execution error: ${errorMsg}`,
       });
-    });
+    }));
 
-    window.runtime.EventsOn("execution-stopped", () => {
+    eventUnsubscribers.push(Events.On("execution-stopped", () => {
       isExecuting = false;
       clearActiveNodes();
       addStatusMessage({
@@ -1023,7 +1056,7 @@
         type: "warning",
         message: "Flow execution was stopped.",
       });
-    });
+    }));
 
     // Nodes the backend left out of the run because nothing connects them to
     // the Start node. They sit on the canvas looking live, so say so rather
@@ -1032,7 +1065,8 @@
     // They are named here *and* marked on the canvas: the names say which
     // nodes without the user leaving the panel, the orange glow says where
     // without the user hunting for them.
-    window.runtime.EventsOn("execution-nodes-skipped", (nodeIds: string[]) => {
+    eventUnsubscribers.push(Events.On("execution-nodes-skipped", ({ data }) => {
+      const nodeIds = data as string[];
       skippedNodeIds = nodeIds;
       addStatusMessage({
         id: `exec-skipped-${Date.now()}`,
@@ -1041,11 +1075,12 @@
           `${nodeIds.length} ${nodeIds.length === 1 ? "node" : "nodes"} skipped` +
           ` - not reachable from Start: ${inFlowOrder(nodeIds).map(nodeLabel).join(", ")}`,
       });
-    });
+    }));
 
     // The run reached a point where nothing was left running and nothing more
     // could ever start - a loop in the connections, in practice.
-    window.runtime.EventsOn("execution-stalled", (nodeIds: string[]) => {
+    eventUnsubscribers.push(Events.On("execution-stalled", ({ data }) => {
+      const nodeIds = data as string[];
       isExecuting = false;
       clearActiveNodes();
       const stuck = inFlowOrder(nodeIds).map(nodeLabel);
@@ -1056,9 +1091,9 @@
           `Flow stopped - ${stuck.join(", ")} could never run.` +
           " Check the connections for a loop.",
       });
-    });
+    }));
 
-    window.runtime.EventsOn("execution-completed", () => {
+    eventUnsubscribers.push(Events.On("execution-completed", () => {
       isExecuting = false;
       isSuccess = true;
       clearActiveNodes();
@@ -1071,16 +1106,35 @@
       setTimeout(() => {
         isSuccess = false;
       }, 1000);
-    });
+    }));
 
     // Add save status listeners
-    window.runtime.EventsOn("save-success", (message) => {
+    eventUnsubscribers.push(Events.On("save-success", ({ data }) => {
       addStatusMessage({
         id: `save-${Date.now()}`,
         type: "success",
-        message: message
+        message: data as string
       });
-    });
+    }));
+
+    // A macro started from the tray menu or a global hotkey, rather than from
+    // this canvas. The task events that follow belong to that macro, and it is
+    // very likely not the one on screen - the window may not even have been
+    // open - so say whose run this is instead of letting the node highlighting
+    // imply it is this one. Nothing here is highlighted: the ids in those
+    // events belong to a graph this canvas does not have, and `nodeLabel`
+    // already falls back gracefully for an id it does not know.
+    eventUnsubscribers.push(Events.On("macro-started", ({ data }) => {
+      const macro = data as { id: string; name: string };
+      isExecuting = true;
+      addStatusMessage({
+        id: `macro-started-${Date.now()}`,
+        type: "info",
+        message: macro.id === $macroID
+          ? `"${macro.name}" started from Keypress itself.`
+          : `"${macro.name}" started outside the workspace - this canvas is not the macro running.`,
+      });
+    }));
 
     // No "save-error" listener: the backend deliberately does not emit one,
     // because `SaveFile` already rejects the bound call with the reason and
@@ -1091,7 +1145,7 @@
   // Load the last opened file when the component mounts
   async function loadLastOpenedFile() {
     try {
-      const data = await LoadLastFile();
+      const data = await App.LoadLastFile();
       if (!data) {
         // Nothing saved yet. The canvas keeps the defaults from flow.ts, and
         // they count as hydrated - coming back from the macro list must not
@@ -1184,6 +1238,9 @@
   });
 
   onDestroy(() => {
+    for (const unsubscribe of eventUnsubscribers) unsubscribe();
+    eventUnsubscribers = [];
+
     clearInterval(dirtyPollTimer);
     clearTimeout(saveSuccessTimer);
     // The glows go with the component, but the timers holding them would

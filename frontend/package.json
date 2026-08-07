@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"build:dev": "vite build --mode development --minify false",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
@@ -35,6 +36,7 @@
 	"type": "module",
 	"dependencies": {
 		"@dagrejs/dagre": "^1.1.4",
+		"@wailsio/runtime": "^3.0.0-beta.1",
 		"@xyflow/svelte": "^0.1.21",
 		"lucide-svelte": "^0.454.0",
 		"mode-watcher": "^0.4.1"

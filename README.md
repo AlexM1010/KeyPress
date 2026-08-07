@@ -11,8 +11,8 @@ Keypress combines a Go backend for system-level automation with a modern SvelteK
 ## Technical Stack
 
 **Backend**
-- Go 1.22+ with concurrent task execution
-- [Wails v2](https://wails.io/) for desktop application framework
+- Go 1.25+ with concurrent task execution
+- [Wails v3](https://v3.wails.io/) for desktop application framework, system tray and global shortcuts
 - [robotgo](https://github.com/go-vgo/robotgo) for cross-platform mouse/keyboard control
 - XDG Base Directory specification for file management
 
@@ -95,50 +95,85 @@ The application implements a hybrid architecture with clear separation of concer
 - Automatic loading of last edited flow
 - JSON-based flow data format
 
+### Runs While Closed
+Keypress is a resident application. Closing the window hides it rather than
+quitting, so a macro can run with nothing on screen:
+
+- **System tray** - a "Run macro" submenu lists your saved macros, "Stop macro"
+  ends a run in progress, and "Quit Keypress" is the only thing that actually
+  exits. Left-clicking the icon brings the window back.
+- **Global hotkeys** - the trigger recorded on a macro's **Start node** (the
+  Record button in the workspace) is registered as a system-wide shortcut. It
+  fires whatever has focus, which is the point: the macro is usually meant to
+  act on some other application. The Start node is the only place a hotkey is
+  set; the Macros page shows each one read-only, so the two can never disagree.
+
+Hotkeys are claimed at startup and re-synced on every save, so recording one and
+saving is all it takes. A combination another application already owns is
+skipped with a log line rather than silently stolen, and a recording with no
+modifier is refused outright - registered system-wide, a bare `J` would take
+that key from every other application on the machine.
+
 ## Project Structure
 
 ```
 Keypress/
 ├── main.go                 # Wails application entry point (embeds the frontend)
+├── Taskfile.yml            # Build entry point (go-task); wraps the wails3 CLI
 ├── backend/
-│   ├── run.go              # Wails app options and startup wiring
+│   ├── run.go              # Wails app options, window and startup wiring
 │   ├── app.go              # Core application logic and Wails bindings
+│   ├── tray.go             # System tray icon and menu
+│   ├── hotkeys.go          # Global shortcuts bound to saved macros
 │   ├── execution.go        # Flowchart execution engine
 │   ├── persistence.go      # Saving and loading macros
 │   ├── actions_*.go        # Keyboard, mouse, delay and colour actions
 │   └── utils/
-│       └── fileutils.go    # File system utilities
+│       └── fileutils.go    # File system utilities and settings
 ├── frontend/
 │   ├── src/
 │   │   ├── routes/         # SvelteKit pages
 │   │   ├── lib/
 │   │   │   ├── components/ # UI components
 │   │   │   ├── stores/     # State management
-│   │   │   └── wailsjs/    # Generated Wails bindings
+│   │   │   └── bindings/   # Generated Wails bindings (wails3 generate bindings)
 │   │   └── app.html
 │   ├── static/             # Static assets
-│   └── build/              # Production build output
-└── build/                  # Compiled desktop application
+│   └── build/              # Production build output (embedded by main.go)
+├── build/                  # Build assets: icons, manifests, platform Taskfiles
+└── bin/                    # Compiled desktop application
 ```
 
 ## Development
 
 ### Prerequisites
-- Go 1.22+
+- Go 1.25+ (Wails v3 requires it; Go's toolchain directive will fetch it)
 - Node.js 18+
-- Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+- Wails v3 CLI (`go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.4`)
+- go-task (`go install github.com/go-task/task/v3/cmd/task@latest`)
 
 ### Development Mode
 ```bash
-wails dev
+task dev
 ```
-Runs with hot reload. Frontend available at http://localhost:34115 for browser testing.
+Runs with hot reload.
 
 ### Production Build
 ```bash
-wails build
+task build
 ```
-Creates a redistributable desktop application with embedded frontend.
+Creates `bin/Keypress.exe` with the frontend embedded.
+
+Note that `CGO_ENABLED=1` is set in `Taskfile.yml`. A stock Wails v3 app is pure
+Go on Windows, but robotgo drives the real mouse and keyboard through cgo, and
+with it disabled the build fails on undefined robotgo symbols.
+
+### Regenerating Bindings
+```bash
+wails3 generate bindings -d frontend/src/lib/bindings -clean=true -ts -i
+```
+Runs automatically as part of `task build`. The output lives under `src/lib` so
+SvelteKit's `$lib` alias reaches it.
 
 ### Frontend Development
 ```bash
@@ -179,8 +214,15 @@ completed    map[string]bool      // track completion
 
 Backend emits events that frontend listens to for real-time updates:
 - `task-started`, `task-completed`, `task-error`
-- `execution-completed`, `execution-stopped`
+- `execution-completed`, `execution-stopped`, `execution-stalled`,
+  `execution-nodes-skipped`, `execution-error`
 - `save-success`
+- `macro-started` - a run begun from the tray or a hotkey rather than from the
+  canvas, carrying the macro's id and name so the workspace does not mistake
+  those task events for its own graph
+
+The frontend subscribes with `Events.On` from `@wailsio/runtime`; v3 delivers
+one event object per listener and puts the payload on its `data`.
 
 ### Data Structures
 

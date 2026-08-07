@@ -6,12 +6,24 @@
 	// an <a> would promise one. Being a button also puts the card in the tab
 	// order and makes it work from the keyboard for free. The click is forwarded
 	// to the parent unchanged.
-	import { Clock, Loader, Waypoints, Workflow } from 'lucide-svelte';
+	import { Clock, Keyboard, Loader, Waypoints, Workflow } from 'lucide-svelte';
 
 	export let name: string;
 	export let nodeCount: number;
 	export let edgeCount: number;
 	export let modifiedAt: string;
+
+	/**
+	 * The global hotkey currently registered for this macro, empty when it has
+	 * none.
+	 *
+	 * Shown, never set. A macro's trigger is recorded on its Start node in the
+	 * workspace - that is the only place it is configured, and the only place it
+	 * is stored. Offering a second way to change it here is what previously let
+	 * a hotkey recorded on the node sit there doing nothing while this card
+	 * claimed a different one.
+	 */
+	export let hotkey = '';
 
 	/** This macro is being loaded into the workspace right now. */
 	export let opening = false;
@@ -39,6 +51,10 @@
 	}
 </script>
 
+<!-- The card and its hotkey line are siblings inside one grid cell, not nested:
+     the hotkey belongs to the macro but is not part of the button that opens
+     it, and reads better under it than crammed into the stats row. -->
+<div class="macro-card-slot">
 <button
 	type="button"
 	class="macro-card"
@@ -75,7 +91,22 @@
 	</span>
 </button>
 
+{#if hotkey}
+	<p class="macro-hotkey">
+		<Keyboard class="w-3.5 h-3.5 macro-hotkey-icon" />
+		<kbd class="macro-hotkey-combo">{hotkey}</kbd>
+	</p>
+{/if}
+</div>
+
 <style lang="scss">
+	.macro-card-slot {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		min-width: 0;
+	}
+
 	.macro-card {
 		display: flex;
 		flex-direction: column;
@@ -160,4 +191,29 @@
 		margin-top: auto;
 		padding-top: 0.15rem;
 	}
+
+	.macro-hotkey {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+		padding: 0 0.25rem;
+		font-size: 0.75rem;
+		color: var(--tertiary-text);
+	}
+
+	.macro-hotkey :global(.macro-hotkey-icon) {
+		flex-shrink: 0;
+	}
+
+	.macro-hotkey-combo {
+		padding: 0.05rem 0.35rem;
+		font-family: inherit;
+		font-size: 0.72rem;
+		color: var(--main-text);
+		background: var(--secondary);
+		border: 1px solid var(--border);
+		border-radius: 5px;
+	}
+
 </style>

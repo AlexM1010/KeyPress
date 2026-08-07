@@ -101,6 +101,18 @@ func (a *App) SaveFile(flowData FlowData, name string, currentID string) (string
 		message = fmt.Sprintf("%s - its old file %q could not be removed and is still listed", message, staleFile)
 	}
 
+	// The saved graph is where the hotkey lives, so this is the moment it can
+	// have changed: a newly recorded trigger on the Start node, one cleared, or
+	// one carried to a new id by a rename. Re-syncing here is what makes
+	// recording a hotkey and saving all the user has to do.
+	a.syncHotkeys()
+
+	// The tray menu lists macros by name and hotkey, so a new or renamed one
+	// has to reach it - otherwise the only way to run a macro with the window
+	// closed is to restart the app first. After syncHotkeys, so the menu shows
+	// the registration that actually took.
+	a.tray.refreshMacros()
+
 	a.emitEvent("save-success", message)
 	return id, nil
 }
@@ -414,6 +426,7 @@ func (a *App) ListProjects() ([]ProjectSummary, error) {
 			NodeCount:  len(flowData.Nodes),
 			EdgeCount:  len(flowData.Edges),
 			ModifiedAt: modifiedAt,
+			Hotkey:     a.hotkeyFor(id),
 		})
 	}
 
