@@ -58,7 +58,7 @@
 
   import { onDestroy, onMount, tick } from "svelte";
   //Flow
-  import { flowTheme } from "$lib/stores/theme";
+  import { flowTheme } from "$lib/stores/theme.svelte";
   import "$lib/index.scss";
   import "./FlowStyle.css";
 
@@ -968,10 +968,10 @@
      text node, never markup, so a node id cannot escape into the document. -->
 <svelte:head>
   {#if skippedGlowCss}
-    <svelte:element this="style">{skippedGlowCss}</svelte:element>
+    <svelte:element this={'style'}>{skippedGlowCss}</svelte:element>
   {/if}
   {#if activeGlowCss}
-    <svelte:element this="style">{activeGlowCss}</svelte:element>
+    <svelte:element this={'style'}>{activeGlowCss}</svelte:element>
   {/if}
 </svelte:head>
 

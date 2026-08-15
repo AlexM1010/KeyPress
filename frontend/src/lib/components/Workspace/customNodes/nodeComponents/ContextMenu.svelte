@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Trash2, Copy } from "lucide-svelte";
-    import { theme } from "$lib/stores/theme";
+    import { theme } from "$lib/stores/theme.svelte";
 
     // Callback props rather than createEventDispatcher.
     //

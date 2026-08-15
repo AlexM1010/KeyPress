@@ -2,7 +2,7 @@
 <script lang="ts">
     import Sun from 'lucide-svelte/icons/sun';
     import Moon from 'lucide-svelte/icons/moon';
-    import { theme, toggleTheme } from '$lib/stores/theme';
+    import { theme, toggleTheme } from '$lib/stores/theme.svelte';
 
     let spin = false;
 

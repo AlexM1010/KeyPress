@@ -1,6 +1,6 @@
 <!-- frontend/src/lib/test/NodeHarness.svelte -->
 <script lang="ts">
-    import type { ComponentType } from 'svelte';
+    import type { ComponentType, SvelteComponent } from 'svelte';
     import { setContext } from 'svelte';
     import { writable } from 'svelte/store';
     import { SvelteFlowProvider } from '@xyflow/svelte';
@@ -22,7 +22,13 @@
      * *store*: `Handle` reads it as `$connectable` whenever the node does not
      * pass `isConnectable` itself.
      */
-    export let component: ComponentType;
+    // `any` props for the same reason `nodeHarness.ts` explains at length: under
+    // Svelte 5 a component's constructor options are invariant in its props, so
+    // nothing with a required prop is assignable to a parameter typed for a
+    // component with arbitrary ones - and taking *any* node is this component's
+    // entire purpose.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    export let component: ComponentType<SvelteComponent<any, any, any>>;
     export let props: Record<string, unknown> = {};
 
     setContext('svelteflow__node_id', props.id);

@@ -1,8 +1,24 @@
 // frontend/src/lib/test/nodeHarness.ts
 import { render } from '@testing-library/svelte';
-import type { ComponentType } from 'svelte';
+import type { ComponentType, SvelteComponent } from 'svelte';
 import NodeHarness from './NodeHarness.svelte';
 import { serializeMacro } from '$lib/stores/flow';
+
+/**
+ * A custom node component, however the Svelte tooling of the day types one.
+ *
+ * The props have to be `any` rather than the node's own shape. Svelte 5's
+ * `svelte2tsx` types a component as `__sveltets_2_IsomorphicComponent` - both
+ * callable and constructible - and its constructor options are invariant in the
+ * props, so a component with a required prop (every node has `id`) is not
+ * assignable to a parameter typed for a component with arbitrary ones. Naming
+ * the props here would only move the problem to the call site, and this helper's
+ * whole job is to take *any* node.
+ *
+ * `nodeTypes.ts` reaches for the same escape hatch, for the same reason.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>>;
 
 // Unmounting between tests is handled once for the whole suite, in `setup.ts`.
 
@@ -18,7 +34,7 @@ import { serializeMacro } from '$lib/stores/flow';
  * store's copy would go stale in exactly the way this returns unchanged.
  */
 export function renderNode<TData extends Record<string, unknown>>(
-	component: ComponentType,
+	component: AnyNodeComponent,
 	data: TData,
 	props: Record<string, unknown> = {}
 ): { data: TData } {

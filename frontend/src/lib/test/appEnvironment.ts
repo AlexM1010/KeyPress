@@ -8,7 +8,7 @@
  * resolve. The values are the ones that are actually true of a component test:
  * it runs in a DOM (jsdom), unbuilt, in development.
  *
- * `browser` is the one that carries weight. `stores/theme.ts` guards its
+ * `browser` is the one that carries weight. `stores/theme.svelte.ts` guards its
  * `document.documentElement` write with it, so reporting `false` here would make
  * the theme store silently skip the side effect the node components' colours
  * come from, and a test of it would pass against a component that does nothing.
