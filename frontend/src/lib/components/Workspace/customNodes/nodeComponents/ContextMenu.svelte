@@ -1,30 +1,29 @@
 <script lang="ts">
     import { Trash2, Copy } from "lucide-svelte";
-    import { createEventDispatcher } from "svelte";
     import { theme } from "$lib/stores/theme";
 
-    const dispatch = createEventDispatcher();
-
-    function handleDuplicate() {
-        dispatch("duplicate");
-    }
-
-    function handleDelete() {
-        dispatch("delete");
-    }
+    // Callback props rather than createEventDispatcher.
+    //
+    // Component events are removed in Svelte 5, and callback props are their
+    // replacement - but they already work in Svelte 4, so this crosses that
+    // break now rather than during the migration. Nothing else about the
+    // component changes: NodeWrapper passes the same two functions it used to
+    // hand to `on:duplicate` / `on:delete`.
+    export let onDuplicate: () => void;
+    export let onDelete: () => void;
 </script>
 
 <div class={`context-menu ${$theme ? "dark" : ""}`}>
     <div class="button-container">
         <button
-            on:click={handleDuplicate}
+            on:click={onDuplicate}
             aria-label="Duplicate"
             class="icon-button"
         >
             <Copy class="icon" />
         </button>
         <button
-            on:click={handleDelete}
+            on:click={onDelete}
             aria-label="Delete"
             class="icon-button"
         >

@@ -78,7 +78,10 @@
             ...$nodesData,
             {
                 ...node,
-                id: `${Math.random()}`,
+                // Same id scheme as a node dropped from the palette (`onDrop` in
+                // Flow.svelte). Both sites have to agree: a duplicate is
+                // indistinguishable from any other node once it is on the canvas.
+                id: crypto.randomUUID(),
                 position: { x: node.position.x + 40, y: node.position.y + 40 },
                 data: structuredClone(node.data),
                 selected: false,
@@ -128,8 +131,8 @@
         tabindex="0"
     >
         <ContextMenu
-            on:duplicate={handleDuplicate}
-            on:delete={handleDelete}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete}
         />
     </div>
     {/if}

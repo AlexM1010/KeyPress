@@ -9,36 +9,34 @@
 		"build:dev": "vite build --mode development --minify false",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"devDependencies": {
-		"@sveltejs/adapter-static": "^3.0.6",
-		"@sveltejs/kit": "^2.7.1",
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.70.2",
 		"@sveltejs/vite-plugin-svelte": "^3.0.0",
-		"@tsconfig/svelte": "^5.0.4",
-		"@types/dompurify": "^3.0.5",
-		"@types/marked": "^5.0.2",
-		"@types/pg": "^8.11.10",
-		"@types/prismjs": "^1.26.5",
-		"autoprefixer": "^10.4.20",
+		"@tsconfig/svelte": "^5.0.8",
+		"@types/node": "^22.20.1",
+		"autoprefixer": "^10.5.4",
 		"clsx": "^2.1.1",
-		"postcss": "^8.4.47",
-		"sass-embedded": "^1.79.4",
-		"svelte": "^4.2.19",
-		"svelte-check": "^4.0.5",
+		"postcss": "^8.5.26",
+		"sass-embedded": "^1.102.0",
+		"svelte": "^4.2.20",
+		"svelte-check": "^4.7.6",
 		"tailwind-merge": "^2.5.4",
 		"tailwindcss": "^3.4.14",
-		"tsx": "^4.19.2",
 		"typescript": "^5.6.3",
 		"vite": "^5.0.3",
-		"zod": "^3.23.8"
+		"vitest": "^2.1.9"
 	},
 	"type": "module",
 	"dependencies": {
-		"@dagrejs/dagre": "^1.1.4",
+		"@dagrejs/dagre": "^1.1.8",
 		"@wailsio/runtime": "^3.0.0-beta.1",
-		"@xyflow/svelte": "^0.1.21",
-		"lucide-svelte": "^0.454.0",
+		"@xyflow/svelte": "^0.1.39",
+		"lucide-svelte": "^1.0.1",
 		"mode-watcher": "^0.4.1"
 	}
 }
