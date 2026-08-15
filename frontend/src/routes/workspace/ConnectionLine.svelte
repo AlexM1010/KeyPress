@@ -46,11 +46,5 @@
 </script>
 
 {#if path}
-	<path
-		d={path}
-		fill="none"
-		stroke="#9ca3af"
-		stroke-width="1"
-		stroke-dasharray="5,5"
-	/>
+	<path d={path} fill="none" stroke="#9ca3af" stroke-width="1" stroke-dasharray="5,5" />
 {/if}

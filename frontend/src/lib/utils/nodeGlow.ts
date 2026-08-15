@@ -20,16 +20,16 @@
  * source of truth: when one changes colour, this table follows.
  */
 export const NODE_TYPE_GLOWS: Record<string, string> = {
-  StartNode: "--node-glow-blue",
-  DelayNode: "--node-glow-blue",
-  MouseClickNode: "--node-glow-green",
-  MouseMoveNode: "--node-glow-green",
-  ColorPickerNode: "--node-glow-indigo",
-  KeyPressNode: "--node-glow-orange",
+	StartNode: '--node-glow-blue',
+	DelayNode: '--node-glow-blue',
+	MouseClickNode: '--node-glow-green',
+	MouseMoveNode: '--node-glow-green',
+	ColorPickerNode: '--node-glow-indigo',
+	KeyPressNode: '--node-glow-orange'
 };
 
 /** For a node type that is not in the table above. */
-export const DEFAULT_NODE_GLOW = "--node-glow-neutral";
+export const DEFAULT_NODE_GLOW = '--node-glow-neutral';
 
 /**
  * Node ids the app generates are `crypto.randomUUID()` values, but ids also
@@ -56,14 +56,14 @@ export const SELECTOR_SAFE_NODE_ID = /^[A-Za-z0-9._:-]+$/;
  * FlowStyle.css, which owns what the mark looks like.
  */
 export function buildSkippedGlowCss(nodeIds: string[]): string {
-  const selectors = nodeIds
-    .filter((id) => SELECTOR_SAFE_NODE_ID.test(id))
-    .map((id) => `.flow-container .svelte-flow__node[data-id="${id}"]`);
-  if (selectors.length === 0) return "";
-  return (
-    `${selectors.join(",")}{--node-skipped-glow:` +
-    `0 0 0 2px var(--skipped-glow),0 0 22px 6px var(--skipped-glow-soft)}`
-  );
+	const selectors = nodeIds
+		.filter((id) => SELECTOR_SAFE_NODE_ID.test(id))
+		.map((id) => `.flow-container .svelte-flow__node[data-id="${id}"]`);
+	if (selectors.length === 0) return '';
+	return (
+		`${selectors.join(',')}{--node-skipped-glow:` +
+		`0 0 0 2px var(--skipped-glow),0 0 22px 6px var(--skipped-glow-soft)}`
+	);
 }
 
 /**
@@ -82,24 +82,20 @@ export function buildSkippedGlowCss(nodeIds: string[]): string {
  * statement in `Flow.svelte` rebuilds the stylesheet when a new run recolours
  * the graph and not only when the set of lit ids changes.
  */
-export function buildActiveGlowCss(
-  nodeIds: string[],
-  glows: Map<string, string>
-): string {
-  const byGlow = new Map<string, string[]>();
-  for (const id of nodeIds) {
-    if (!SELECTOR_SAFE_NODE_ID.test(id)) continue;
-    const glow = glows.get(id) ?? DEFAULT_NODE_GLOW;
-    const selectors = byGlow.get(glow);
-    const selector = `.flow-container .svelte-flow__node[data-id="${id}"]`;
-    if (selectors) selectors.push(selector);
-    else byGlow.set(glow, [selector]);
-  }
+export function buildActiveGlowCss(nodeIds: string[], glows: Map<string, string>): string {
+	const byGlow = new Map<string, string[]>();
+	for (const id of nodeIds) {
+		if (!SELECTOR_SAFE_NODE_ID.test(id)) continue;
+		const glow = glows.get(id) ?? DEFAULT_NODE_GLOW;
+		const selectors = byGlow.get(glow);
+		const selector = `.flow-container .svelte-flow__node[data-id="${id}"]`;
+		if (selectors) selectors.push(selector);
+		else byGlow.set(glow, [selector]);
+	}
 
-  let css = "";
-  for (const [glow, selectors] of byGlow) {
-    css +=
-      `${selectors.join(",")}{--node-active-glow:` + `0 0 26px 8px var(${glow})}`;
-  }
-  return css;
+	let css = '';
+	for (const [glow, selectors] of byGlow) {
+		css += `${selectors.join(',')}{--node-active-glow:` + `0 0 26px 8px var(${glow})}`;
+	}
+	return css;
 }

@@ -5,10 +5,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap');
 
-html { font-family: "Inter", "system-ui"; }
+html {
+	font-family: 'Inter', 'system-ui';
+}
 
 @supports (font-variation-settings: normal) {
-  html { font-family: "InterVariable", "system-ui"; }
+	html {
+		font-family: 'InterVariable', 'system-ui';
+	}
 }
 
 :root {
@@ -53,7 +57,7 @@ html { font-family: "Inter", "system-ui"; }
 	--link-light: #3b82f6;
 
 	--error-color-light: #dc2626; /* red-600 */
-    --error-color-dark: #f87171; /* red-400 */
+	--error-color-dark: #f87171; /* red-400 */
 
 	/* Nodes a run left out because nothing connects them to the Start node.
 	   Two tones per theme: the solid one draws the ring that says exactly which
@@ -132,7 +136,8 @@ body {
 
 * {
 	transition-duration: 200ms;
-	transition-property: background, border-color, opacity, box-shadow, top, bottom, left, margin, right;
+	transition-property:
+		background, border-color, opacity, box-shadow, top, bottom, left, margin, right;
 }
 
 :root[data-theme='dark'] {
@@ -156,7 +161,7 @@ body {
 	--tertiary-text-hover: var(--light-3);
 	--accent-text: var(--light-3);
 	--accent-text-hover: var(--light-4);
-	
+
 	--border: var(--light-1);
 	--border-hover: var(--dark-8);
 
@@ -461,6 +466,12 @@ body {
 	}
 }
 
-body, h1, h2, h3, h4, h5, h6 {
-    font-family: "InterVariable", "system-ui";
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: 'InterVariable', 'system-ui';
 }

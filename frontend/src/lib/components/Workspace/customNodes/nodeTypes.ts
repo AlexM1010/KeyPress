@@ -25,11 +25,11 @@ import DelayNode from './DelayNode.svelte';
  * and the entries are the plain imports.
  */
 export const nodeTypes: NodeTypes = {
-  'ColorPickerNode': ColorPickerNode,
-  'svgNode': SVGNode,
-  'MouseClickNode': MouseClickNode,
-  'KeyPressNode': KeyPressNode,
-  'StartNode': StartNode,
-  'MouseMoveNode': MouseMoveNode,
-  'DelayNode': DelayNode
+	ColorPickerNode: ColorPickerNode,
+	svgNode: SVGNode,
+	MouseClickNode: MouseClickNode,
+	KeyPressNode: KeyPressNode,
+	StartNode: StartNode,
+	MouseMoveNode: MouseMoveNode,
+	DelayNode: DelayNode
 };

@@ -45,7 +45,9 @@ describe('isBackendUnreachable', () => {
 
 describe('describeBackendError', () => {
 	it('names an unreachable backend rather than repeating the runtime', () => {
-		expect(describeBackendError('<!doctype html><html></html>')).toMatch(/Not connected to the KeyPress backend/);
+		expect(describeBackendError('<!doctype html><html></html>')).toMatch(
+			/Not connected to the KeyPress backend/
+		);
 	});
 
 	it('passes a real backend error through untouched', () => {

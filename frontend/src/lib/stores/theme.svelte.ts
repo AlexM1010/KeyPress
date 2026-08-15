@@ -17,15 +17,17 @@ import { browser } from '$app/environment';
 // this. Only the import specifier moved.
 
 function updateThemeAttribute(theme: boolean): void {
-  if (browser) {
-    document.documentElement.setAttribute('data-theme', theme ? 'dark' : 'light');
-  }
+	if (browser) {
+		document.documentElement.setAttribute('data-theme', theme ? 'dark' : 'light');
+	}
 }
 
 /** Whether dark mode is in force, resolving "system" against the OS setting. */
 function prefersDark(): boolean {
-  const preference = userPrefersMode.current;
-  return preference === 'dark' || (preference === 'light' ? false : systemPrefersMode.current === 'dark');
+	const preference = userPrefersMode.current;
+	return (
+		preference === 'dark' || (preference === 'light' ? false : systemPrefersMode.current === 'dark')
+	);
 }
 
 /**
@@ -45,23 +47,23 @@ function prefersDark(): boolean {
  * wrong `data-theme` is a visible flash of the wrong colours.
  */
 export const theme: Readable<boolean> = readable(false, (set) => {
-  const publish = () => {
-    const dark = prefersDark();
-    updateThemeAttribute(dark);
-    set(dark);
-  };
+	const publish = () => {
+		const dark = prefersDark();
+		updateThemeAttribute(dark);
+		set(dark);
+	};
 
-  publish();
-  return $effect.root(() => {
-    $effect(publish);
-  });
+	publish();
+	return $effect.root(() => {
+		$effect(publish);
+	});
 });
 
 // Flip between light/dark, or force a specific mode when `value` is given.
 // `true` === dark, mirroring the `theme` store above.
 export const toggleTheme = (value?: boolean): void => {
-    const next = typeof value === 'boolean' ? value : !prefersDark();
-    setMode(next ? 'dark' : 'light');
+	const next = typeof value === 'boolean' ? value : !prefersDark();
+	setMode(next ? 'dark' : 'light');
 };
 
 /**
@@ -69,10 +71,10 @@ export const toggleTheme = (value?: boolean): void => {
  * "system" as an answer in its own right - the library resolves it itself.
  */
 export const flowTheme: Readable<ColorMode> = readable<ColorMode>('system', (set) => {
-  const publish = () => set(userPrefersMode.current || 'system');
+	const publish = () => set(userPrefersMode.current || 'system');
 
-  publish();
-  return $effect.root(() => {
-    $effect(publish);
-  });
+	publish();
+	return $effect.root(() => {
+		$effect(publish);
+	});
 });

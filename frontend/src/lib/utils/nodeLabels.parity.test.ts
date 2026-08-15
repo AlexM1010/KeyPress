@@ -84,10 +84,7 @@ describe('the labelling uses that same answer', () => {
 				return { id: node.id, step: label.step, reachable: reachable.has(node.id) };
 			});
 
-			const lastReachable = Math.max(
-				0,
-				...steps.filter((s) => s.reachable).map((s) => s.step)
-			);
+			const lastReachable = Math.max(0, ...steps.filter((s) => s.reachable).map((s) => s.step));
 			const firstUnreachable = Math.min(
 				Number.MAX_SAFE_INTEGER,
 				...steps.filter((s) => !s.reachable).map((s) => s.step)

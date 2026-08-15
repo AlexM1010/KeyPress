@@ -277,13 +277,7 @@ describe('buildNodeLabels: what a node is called', () => {
 			node('w', 'ColorPickerNode', 0, 400),
 			node('k', 'KeyPressNode', 0, 500)
 		];
-		const edges = [
-			edge('S', 'd'),
-			edge('d', 'c'),
-			edge('c', 'm'),
-			edge('m', 'w'),
-			edge('w', 'k')
-		];
+		const edges = [edge('S', 'd'), edge('d', 'c'), edge('c', 'm'), edge('m', 'w'), edge('w', 'k')];
 
 		const labels = buildNodeLabels(nodes, edges);
 

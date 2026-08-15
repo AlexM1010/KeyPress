@@ -9,7 +9,6 @@ import NodeHarness from '$lib/test/NodeHarness.svelte';
 import { graph, type FlowNode } from '$lib/stores/flow.svelte';
 import NodeWrapper from './NodeWrapper.svelte';
 
-
 const NODE_ID = 'keypress-1';
 const TITLE = 'Keypress';
 

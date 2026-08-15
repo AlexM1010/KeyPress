@@ -55,48 +55,43 @@
      the hotkey belongs to the macro but is not part of the button that opens
      it, and reads better under it than crammed into the stats row. -->
 <div class="macro-card-slot">
-<button
-	type="button"
-	class="macro-card"
-	title={`Open "${name}" in the workspace`}
-	on:click
->
-	<span class="macro-card-head">
-		<span class="macro-card-icon">
-			{#if opening}
-				<!-- The keyframes are global (index.scss); naming them from the style
+	<button type="button" class="macro-card" title={`Open "${name}" in the workspace`} on:click>
+		<span class="macro-card-head">
+			<span class="macro-card-icon">
+				{#if opening}
+					<!-- The keyframes are global (index.scss); naming them from the style
 				     block below keeps an inline `style` out of the markup. -->
-				<Loader class="w-4 h-4 macro-card-spinner" />
-			{:else}
-				<Workflow class="w-4 h-4" />
-			{/if}
+					<Loader class="w-4 h-4 macro-card-spinner" />
+				{:else}
+					<Workflow class="w-4 h-4" />
+				{/if}
+			</span>
+			<span class="macro-card-name">{name}</span>
 		</span>
-		<span class="macro-card-name">{name}</span>
-	</span>
 
-	<span class="macro-card-meta">
-		<span class="macro-card-stat">
-			<Waypoints class="w-3.5 h-3.5" />
-			{plural(nodeCount, 'node')}
+		<span class="macro-card-meta">
+			<span class="macro-card-stat">
+				<Waypoints class="w-3.5 h-3.5" />
+				{plural(nodeCount, 'node')}
+			</span>
+			<span class="macro-card-stat">
+				<Workflow class="w-3.5 h-3.5" />
+				{plural(edgeCount, 'connection')}
+			</span>
 		</span>
-		<span class="macro-card-stat">
-			<Workflow class="w-3.5 h-3.5" />
-			{plural(edgeCount, 'connection')}
+
+		<span class="macro-card-stat macro-card-modified">
+			<Clock class="w-3.5 h-3.5" />
+			{formatModified(modifiedAt)}
 		</span>
-	</span>
+	</button>
 
-	<span class="macro-card-stat macro-card-modified">
-		<Clock class="w-3.5 h-3.5" />
-		{formatModified(modifiedAt)}
-	</span>
-</button>
-
-{#if hotkey}
-	<p class="macro-hotkey">
-		<Keyboard class="w-3.5 h-3.5 macro-hotkey-icon" />
-		<kbd class="macro-hotkey-combo">{hotkey}</kbd>
-	</p>
-{/if}
+	{#if hotkey}
+		<p class="macro-hotkey">
+			<Keyboard class="w-3.5 h-3.5 macro-hotkey-icon" />
+			<kbd class="macro-hotkey-combo">{hotkey}</kbd>
+		</p>
+	{/if}
 </div>
 
 <style lang="scss">
@@ -215,5 +210,4 @@
 		border: 1px solid var(--border);
 		border-radius: 5px;
 	}
-
 </style>

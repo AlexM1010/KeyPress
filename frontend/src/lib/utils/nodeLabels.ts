@@ -19,16 +19,16 @@
  * gets a label - see `buildNodeLabels`.
  */
 export const NODE_TYPE_TITLES: Record<string, string> = {
-  StartNode: "Start",
-  DelayNode: "Delay",
-  MouseClickNode: "Mouse Click",
-  MouseMoveNode: "Mouse Move",
-  ColorPickerNode: "Wait For Color",
-  KeyPressNode: "Keypress",
+	StartNode: 'Start',
+	DelayNode: 'Delay',
+	MouseClickNode: 'Mouse Click',
+	MouseMoveNode: 'Mouse Move',
+	ColorPickerNode: 'Wait For Color',
+	KeyPressNode: 'Keypress'
 };
 
 /** Shown when a reported node is not in the graph the run was started from. */
-export const UNKNOWN_NODE_LABEL = "Unknown node";
+export const UNKNOWN_NODE_LABEL = 'Unknown node';
 
 /**
  * The subset of a node this file needs to label it. Deliberately structural
@@ -36,9 +36,9 @@ export const UNKNOWN_NODE_LABEL = "Unknown node";
  * whose `type` is optional.
  */
 export type LabellableNode = {
-  id: string;
-  type?: string;
-  position: { x: number; y: number };
+	id: string;
+	type?: string;
+	position: { x: number; y: number };
 };
 
 /**
@@ -47,8 +47,8 @@ export type LabellableNode = {
  * here.
  */
 export type LabellableEdge = {
-  source: string;
-  target: string;
+	source: string;
+	target: string;
 };
 
 /**
@@ -58,8 +58,8 @@ export type LabellableEdge = {
  * ids can be put back into flow order without parsing the text.
  */
 export type NodeLabel = {
-  label: string;
-  step: number;
+	label: string;
+	step: number;
 };
 
 /**
@@ -68,20 +68,20 @@ export type NodeLabel = {
  * in" can never read the same flowchart two different ways.
  */
 type FlowGraph = {
-  /** Every node of the flow, by id. */
-  byId: Map<string, LabellableNode>;
-  /** The node the run begins at, absent if the flow has none. */
-  startId: string | undefined;
-  /** Forward adjacency: which nodes each node hands on to. */
-  successors: Map<string, string[]>;
-  /** The same edges backwards: which nodes each node waits for. */
-  predecessors: Map<string, string[]>;
-  /**
-   * Every node that takes part in an edge, recorded before any edge is dropped
-   * from the adjacency, so it matches the backend's own "connected" test in
-   * `warnAboutSkippedNodes`.
-   */
-  wired: Set<string>;
+	/** Every node of the flow, by id. */
+	byId: Map<string, LabellableNode>;
+	/** The node the run begins at, absent if the flow has none. */
+	startId: string | undefined;
+	/** Forward adjacency: which nodes each node hands on to. */
+	successors: Map<string, string[]>;
+	/** The same edges backwards: which nodes each node waits for. */
+	predecessors: Map<string, string[]>;
+	/**
+	 * Every node that takes part in an edge, recorded before any edge is dropped
+	 * from the adjacency, so it matches the backend's own "connected" test in
+	 * `warnAboutSkippedNodes`.
+	 */
+	wired: Set<string>;
 };
 
 /**
@@ -90,34 +90,31 @@ type FlowGraph = {
  * *into* the Start node - which `StartExecution` enqueues unconditionally, so
  * they are not prerequisites and must not be read as any.
  */
-function shapeGraph(
-  nodes: LabellableNode[],
-  edges: LabellableEdge[]
-): FlowGraph {
-  const byId = new Map<string, LabellableNode>();
-  for (const node of nodes) byId.set(node.id, node);
+function shapeGraph(nodes: LabellableNode[], edges: LabellableEdge[]): FlowGraph {
+	const byId = new Map<string, LabellableNode>();
+	for (const node of nodes) byId.set(node.id, node);
 
-  const startId = nodes.find((node) => node.type === "StartNode")?.id;
+	const startId = nodes.find((node) => node.type === 'StartNode')?.id;
 
-  const successors = new Map<string, string[]>();
-  const predecessors = new Map<string, string[]>();
-  const wired = new Set<string>();
-  const link = (map: Map<string, string[]>, from: string, to: string) => {
-    const list = map.get(from);
-    if (list) list.push(to);
-    else map.set(from, [to]);
-  };
-  for (const edge of edges) {
-    if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
-    wired.add(edge.source);
-    wired.add(edge.target);
-    // The Start node runs regardless of what points at it.
-    if (edge.target === startId) continue;
-    link(successors, edge.source, edge.target);
-    link(predecessors, edge.target, edge.source);
-  }
+	const successors = new Map<string, string[]>();
+	const predecessors = new Map<string, string[]>();
+	const wired = new Set<string>();
+	const link = (map: Map<string, string[]>, from: string, to: string) => {
+		const list = map.get(from);
+		if (list) list.push(to);
+		else map.set(from, [to]);
+	};
+	for (const edge of edges) {
+		if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
+		wired.add(edge.source);
+		wired.add(edge.target);
+		// The Start node runs regardless of what points at it.
+		if (edge.target === startId) continue;
+		link(successors, edge.source, edge.target);
+		link(predecessors, edge.target, edge.source);
+	}
 
-  return { byId, startId, successors, predecessors, wired };
+	return { byId, startId, successors, predecessors, wired };
 }
 
 /**
@@ -136,19 +133,19 @@ function shapeGraph(
  * tests are what catches it.
  */
 function walkForwards({ startId, successors }: FlowGraph): Set<string> {
-  const reachable = new Set<string>();
-  if (startId === undefined) return reachable;
+	const reachable = new Set<string>();
+	if (startId === undefined) return reachable;
 
-  reachable.add(startId);
-  const queue = [startId];
-  for (let i = 0; i < queue.length; i++) {
-    for (const next of successors.get(queue[i]) ?? []) {
-      if (reachable.has(next)) continue;
-      reachable.add(next);
-      queue.push(next);
-    }
-  }
-  return reachable;
+	reachable.add(startId);
+	const queue = [startId];
+	for (let i = 0; i < queue.length; i++) {
+		for (const next of successors.get(queue[i]) ?? []) {
+			if (reachable.has(next)) continue;
+			reachable.add(next);
+			queue.push(next);
+		}
+	}
+	return reachable;
 }
 
 /**
@@ -161,11 +158,8 @@ function walkForwards({ startId, successors }: FlowGraph): Set<string> {
  * cannot answer differently from the labelling - which is the point, since it
  * is what the parity test against the Go engine runs.
  */
-export function reachableNodes(
-  nodes: LabellableNode[],
-  edges: LabellableEdge[]
-): Set<string> {
-  return walkForwards(shapeGraph(nodes, edges));
+export function reachableNodes(nodes: LabellableNode[], edges: LabellableEdge[]): Set<string> {
+	return walkForwards(shapeGraph(nodes, edges));
 }
 
 /**
@@ -208,117 +202,106 @@ export function reachableNodes(
  * are usually just something the user has only dropped on the canvas so far.
  */
 export function buildNodeLabels(
-  nodes: LabellableNode[],
-  edges: LabellableEdge[]
+	nodes: LabellableNode[],
+	edges: LabellableEdge[]
 ): Map<string, NodeLabel> {
-  const graph = shapeGraph(nodes, edges);
-  const { byId, successors, predecessors, wired } = graph;
+	const graph = shapeGraph(nodes, edges);
+	const { byId, successors, predecessors, wired } = graph;
 
-  const positionOf = (id: string) => byId.get(id)?.position ?? { x: 0, y: 0 };
-  const canvasOrder = (a: string, b: string) => {
-    const pa = positionOf(a);
-    const pb = positionOf(b);
-    return pa.y - pb.y || pa.x - pb.x || a.localeCompare(b);
-  };
+	const positionOf = (id: string) => byId.get(id)?.position ?? { x: 0, y: 0 };
+	const canvasOrder = (a: string, b: string) => {
+		const pa = positionOf(a);
+		const pb = positionOf(b);
+		return pa.y - pb.y || pa.x - pb.x || a.localeCompare(b);
+	};
 
-  const reachable = walkForwards(graph);
+	const reachable = walkForwards(graph);
 
-  /**
-   * One set of nodes in longest-path order, prerequisites counted only within
-   * the set. Anything the walk cannot release (a cycle, or a node behind one)
-   * is appended in canvas order rather than dropped or looped over.
-   */
-  const orderGroup = (members: Set<string>): string[] => {
-    const waiting = new Map<string, number>();
-    for (const id of members) {
-      let count = 0;
-      for (const pred of predecessors.get(id) ?? []) {
-        if (members.has(pred)) count += 1;
-      }
-      waiting.set(id, count);
-    }
+	/**
+	 * One set of nodes in longest-path order, prerequisites counted only within
+	 * the set. Anything the walk cannot release (a cycle, or a node behind one)
+	 * is appended in canvas order rather than dropped or looped over.
+	 */
+	const orderGroup = (members: Set<string>): string[] => {
+		const waiting = new Map<string, number>();
+		for (const id of members) {
+			let count = 0;
+			for (const pred of predecessors.get(id) ?? []) {
+				if (members.has(pred)) count += 1;
+			}
+			waiting.set(id, count);
+		}
 
-    const depth = new Map<string, number>();
-    const released: string[] = [];
-    for (const id of members) {
-      if (waiting.get(id) === 0) {
-        depth.set(id, 0);
-        released.push(id);
-      }
-    }
-    for (let i = 0; i < released.length; i++) {
-      const current = released[i];
-      const nextDepth = (depth.get(current) ?? 0) + 1;
-      for (const next of successors.get(current) ?? []) {
-        if (!members.has(next)) continue;
-        const best = depth.get(next);
-        if (best === undefined || best < nextDepth) depth.set(next, nextDepth);
-        const left = (waiting.get(next) ?? 0) - 1;
-        waiting.set(next, left);
-        if (left === 0) released.push(next);
-      }
-    }
+		const depth = new Map<string, number>();
+		const released: string[] = [];
+		for (const id of members) {
+			if (waiting.get(id) === 0) {
+				depth.set(id, 0);
+				released.push(id);
+			}
+		}
+		for (let i = 0; i < released.length; i++) {
+			const current = released[i];
+			const nextDepth = (depth.get(current) ?? 0) + 1;
+			for (const next of successors.get(current) ?? []) {
+				if (!members.has(next)) continue;
+				const best = depth.get(next);
+				if (best === undefined || best < nextDepth) depth.set(next, nextDepth);
+				const left = (waiting.get(next) ?? 0) - 1;
+				waiting.set(next, left);
+				if (left === 0) released.push(next);
+			}
+		}
 
-    const ordered = released
-      .slice()
-      .sort(
-        (a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || canvasOrder(a, b)
-      );
-    const releasedSet = new Set(released);
-    const stuck = [...members]
-      .filter((id) => !releasedSet.has(id))
-      .sort(canvasOrder);
-    return [...ordered, ...stuck];
-  };
+		const ordered = released
+			.slice()
+			.sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || canvasOrder(a, b));
+		const releasedSet = new Set(released);
+		const stuck = [...members].filter((id) => !releasedSet.has(id)).sort(canvasOrder);
+		return [...ordered, ...stuck];
+	};
 
-  const order: string[] = [];
-  if (reachable.size > 0) order.push(...orderGroup(reachable));
+	const order: string[] = [];
+	if (reachable.size > 0) order.push(...orderGroup(reachable));
 
-  // Dead branches, one weakly connected group at a time.
-  const deadEnds = [...byId.keys()].filter(
-    (id) => !reachable.has(id) && wired.has(id)
-  );
-  const grouped = new Set<string>();
-  for (const seed of deadEnds.slice().sort(canvasOrder)) {
-    if (grouped.has(seed)) continue;
-    const group = new Set<string>([seed]);
-    grouped.add(seed);
-    const frontier = [seed];
-    for (let i = 0; i < frontier.length; i++) {
-      const current = frontier[i];
-      const neighbours = [
-        ...(successors.get(current) ?? []),
-        ...(predecessors.get(current) ?? []),
-      ];
-      for (const neighbour of neighbours) {
-        if (reachable.has(neighbour) || group.has(neighbour)) continue;
-        group.add(neighbour);
-        grouped.add(neighbour);
-        frontier.push(neighbour);
-      }
-    }
-    order.push(...orderGroup(group));
-  }
+	// Dead branches, one weakly connected group at a time.
+	const deadEnds = [...byId.keys()].filter((id) => !reachable.has(id) && wired.has(id));
+	const grouped = new Set<string>();
+	for (const seed of deadEnds.slice().sort(canvasOrder)) {
+		if (grouped.has(seed)) continue;
+		const group = new Set<string>([seed]);
+		grouped.add(seed);
+		const frontier = [seed];
+		for (let i = 0; i < frontier.length; i++) {
+			const current = frontier[i];
+			const neighbours = [...(successors.get(current) ?? []), ...(predecessors.get(current) ?? [])];
+			for (const neighbour of neighbours) {
+				if (reachable.has(neighbour) || group.has(neighbour)) continue;
+				group.add(neighbour);
+				grouped.add(neighbour);
+				frontier.push(neighbour);
+			}
+		}
+		order.push(...orderGroup(group));
+	}
 
-  // Anything in no edge at all.
-  order.push(
-    ...[...byId.keys()]
-      .filter((id) => !reachable.has(id) && !wired.has(id))
-      .sort(canvasOrder)
-  );
+	// Anything in no edge at all.
+	order.push(
+		...[...byId.keys()].filter((id) => !reachable.has(id) && !wired.has(id)).sort(canvasOrder)
+	);
 
-  const labels = new Map<string, NodeLabel>();
-  order.forEach((id, index) => {
-    // An unregistered type has no title of its own. Its registry key is poor
-    // UI text, but it still tells the user far more than a raw id.
-    const type = byId.get(id)?.type ?? "";
-    const title = NODE_TYPE_TITLES[type] ?? (type || UNKNOWN_NODE_LABEL);
-    // The step is still computed and kept, but deliberately not shown: it is
-    // what puts multi-node messages into flow order below. Status messages
-    // name a node by type alone.
-    labels.set(id, { label: title, step: index + 1 });
-  });
-  return labels;
+	const labels = new Map<string, NodeLabel>();
+	order.forEach((id, index) => {
+		// An unregistered type has no title of its own. Its registry key is poor
+		// UI text, but it still tells the user far more than a raw id.
+		const type = byId.get(id)?.type ?? '';
+		const title = NODE_TYPE_TITLES[type] ?? (type || UNKNOWN_NODE_LABEL);
+		// The step is still computed and kept, but deliberately not shown: it is
+		// what puts multi-node messages into flow order below. Status messages
+		// name a node by type alone.
+		labels.set(id, { label: title, step: index + 1 });
+	});
+	return labels;
 }
 
 /**
@@ -331,11 +314,8 @@ export function buildNodeLabels(
  * `Flow.svelte` froze when the run started, and it belongs to that component's
  * state - see the thin wrapper there that closes over it.
  */
-export function nodeLabel(
-  labels: Map<string, NodeLabel>,
-  nodeId: string
-): string {
-  return labels.get(nodeId)?.label ?? UNKNOWN_NODE_LABEL;
+export function nodeLabel(labels: Map<string, NodeLabel>, nodeId: string): string {
+	return labels.get(nodeId)?.label ?? UNKNOWN_NODE_LABEL;
 }
 
 /**
@@ -349,10 +329,7 @@ export function nodeLabel(
  *
  * Takes the label map for the same reason `nodeLabel` does.
  */
-export function inFlowOrder(
-  labels: Map<string, NodeLabel>,
-  nodeIds: string[]
-): string[] {
-  const step = (id: string) => labels.get(id)?.step ?? Number.MAX_SAFE_INTEGER;
-  return nodeIds.slice().sort((a, b) => step(a) - step(b) || a.localeCompare(b));
+export function inFlowOrder(labels: Map<string, NodeLabel>, nodeIds: string[]): string[] {
+	const step = (id: string) => labels.get(id)?.step ?? Number.MAX_SAFE_INTEGER;
+	return nodeIds.slice().sort((a, b) => step(a) - step(b) || a.localeCompare(b));
 }

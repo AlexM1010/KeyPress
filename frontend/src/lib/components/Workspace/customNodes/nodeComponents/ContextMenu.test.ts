@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import ContextMenu from './ContextMenu.svelte';
 
-
 describe('ContextMenu', () => {
 	it('calls back on duplicate', async () => {
 		const onDuplicate = vi.fn();

@@ -66,9 +66,7 @@
 	// -------
 
 	type OpenState =
-		| { status: 'idle' }
-		| { status: 'opening'; id: string }
-		| { status: 'error'; message: string };
+		{ status: 'idle' } | { status: 'opening'; id: string } | { status: 'error'; message: string };
 
 	let openState: OpenState = { status: 'idle' };
 

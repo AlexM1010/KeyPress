@@ -23,28 +23,28 @@ export type NodeDataPayload = Record<string, unknown>;
 
 /** A whole node in the flow graph: identity, position and its data payload. */
 export type FlowNode<TData extends NodeDataPayload = NodeDataPayload> = Node<TData> & {
-    id: string;
-    type: string;
-    data: TData;
+	id: string;
+	type: string;
+	data: TData;
 };
 
 /** Data payload of a `MouseClickNode`. */
 export type MouseClickNodeData = {
-    buttonType: 'left' | 'middle' | 'right';
-    numberOfClicks: number;
-    clickDelay: number;
-    pressReleaseDelay: number;
-    releaseAfterPress: boolean;
-    scrollDirection: ('Vertical' | 'Horizontal')[];
-    scrollLines: number;
+	buttonType: 'left' | 'middle' | 'right';
+	numberOfClicks: number;
+	clickDelay: number;
+	pressReleaseDelay: number;
+	releaseAfterPress: boolean;
+	scrollDirection: ('Vertical' | 'Horizontal')[];
+	scrollLines: number;
 };
 
 /** Data payload of a `DelayNode`. */
 export type DelayNodeData = {
-    delayType: 'Fixed' | 'Random';
-    time: number;
-    minTime: number;
-    maxTime: number;
+	delayType: 'Fixed' | 'Random';
+	time: number;
+	minTime: number;
+	maxTime: number;
 };
 
 /**
@@ -56,10 +56,10 @@ export type DelayNodeData = {
  * title and colour from its props.
  */
 export type StartNodeData = {
-    macroKeys: string[];
-    label?: string;
-    icon?: string;
-    color?: string;
+	macroKeys: string[];
+	label?: string;
+	icon?: string;
+	color?: string;
 };
 
 // `KeyPressNode`'s payload is declared in the component that owns it
@@ -68,18 +68,18 @@ export type StartNodeData = {
 
 // Default nodes for new flows
 const defaultNodes: FlowNode[] = [
-  {
-    id: 'startnode-1',
-    type: 'StartNode',
-    position: { x: 100, y: 200 },
-    data: { label: 'Start', icon: 'Play', color: 'bg-gradient-to-r from-blue-500 to-blue-600' }
-  },
-  {
-    id: 'delaynode-1',
-    type: 'DelayNode',
-    position: { x: 400, y: 200 },
-    data: { delayType: 'Fixed', time: 1000 }
-  }
+	{
+		id: 'startnode-1',
+		type: 'StartNode',
+		position: { x: 100, y: 200 },
+		data: { label: 'Start', icon: 'Play', color: 'bg-gradient-to-r from-blue-500 to-blue-600' }
+	},
+	{
+		id: 'delaynode-1',
+		type: 'DelayNode',
+		position: { x: 400, y: 200 },
+		data: { delayType: 'Fixed', time: 1000 }
+	}
 ];
 
 /**
@@ -100,13 +100,13 @@ const defaultNodes: FlowNode[] = [
  *   shape a user-drawn edge does.
  */
 const defaultEdges: Edge[] = [
-  {
-    id: 'edge-1',
-    source: 'startnode-1',
-    sourceHandle: 'right',
-    target: 'delaynode-1',
-    targetHandle: 'left'
-  }
+	{
+		id: 'edge-1',
+		source: 'startnode-1',
+		sourceHandle: 'right',
+		target: 'delaynode-1',
+		targetHandle: 'left'
+	}
 ];
 
 /**
