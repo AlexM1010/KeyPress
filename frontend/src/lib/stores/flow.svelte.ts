@@ -149,6 +149,73 @@ class FlowGraph {
 
 export const graph = new FlowGraph();
 
+/** How far a duplicate is offset from the node it was copied from, in px. */
+const DUPLICATE_OFFSET = 40;
+
+/**
+ * Copies the given nodes onto the canvas, and returns the copies.
+ *
+ * Lives here rather than in the component that used to own it because there is
+ * now more than one way to ask for it - the hover menu on a single node, and the
+ * selection toolbar on several - and every part of the shape below has to be
+ * identical whichever asked. The old comment on this code warned that the id
+ * scheme "has to agree" with the one `onDrop` uses; two callers of two copies of
+ * this would have been a third and a fourth thing to keep in agreement.
+ *
+ * Three details are load-bearing:
+ *
+ * - `data` is deep-copied, via `$state.snapshot`. Every node component edits the
+ *   payload it is handed in place - that is how an edit reaches the graph - so a
+ *   shallow copy would leave the clone editing the original's nested arrays, and
+ *   ticking a modifier on the copy would tick it on the node it came from.
+ *   `structuredClone` cannot do this job any more: `graph.nodes` is deep
+ *   `$state`, so `node.data` is a proxy and structuredClone throws
+ *   `DataCloneError` on one. The snapshot unwraps and deep-copies in a single
+ *   step.
+ * - A fresh `crypto.randomUUID()`, the same id scheme `onDrop` in Flow.svelte
+ *   uses: once it is on the canvas a duplicate has to be indistinguishable from
+ *   any other node, and a reused id would have Svelte Flow key two nodes alike.
+ * - The copies come out *selected* and the originals do not. Duplicating several
+ *   nodes and then dragging them apart is the whole point of doing it to a
+ *   selection, and that only works if the selection follows the copies. It also
+ *   means duplicating twice in a row gives two separate pairs rather than three
+ *   copies of the first node.
+ *
+ * Edges between the duplicated nodes are deliberately not copied. A duplicate
+ * lands offset on top of its original and the user is about to move it; guessing
+ * that they also want the wiring re-created, in a graph where an edge carries
+ * handle ids and execution order, is a bigger assumption than this is worth.
+ */
+export function duplicateNodes(ids: string[]): FlowNode[] {
+	const wanted = new Set(ids);
+	const copies = graph.nodes
+		.filter((node) => wanted.has(node.id))
+		.map((node) => ({
+			...node,
+			id: crypto.randomUUID(),
+			position: {
+				x: node.position.x + DUPLICATE_OFFSET,
+				y: node.position.y + DUPLICATE_OFFSET
+			},
+			data: $state.snapshot(node.data) as NodeDataPayload,
+			selected: true
+		})) as FlowNode[];
+
+	if (copies.length === 0) return [];
+
+	graph.nodes = [
+		...graph.nodes.map((node) => (wanted.has(node.id) ? { ...node, selected: false } : node)),
+		...copies
+	];
+
+	return copies;
+}
+
+/** The nodes Svelte Flow currently has selected, in graph order. */
+export function selectedNodes(): FlowNode[] {
+	return graph.nodes.filter((node) => node.selected);
+}
+
 /**
  * Identity of the macro the workspace currently has open: the display name the
  * user typed, and the id (bare filename) of the file it lives in - "" when this

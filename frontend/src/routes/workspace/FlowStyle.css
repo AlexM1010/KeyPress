@@ -399,3 +399,15 @@
     border-bottom-left-radius: 0.25rem;
     border-bottom-right-radius: 0.25rem;
 }
+
+/* Selection toolbar. Sits opposite the control panel, and only while more than
+   one node is selected - see the note on it in Flow.svelte. The count is styled
+   as a label rather than a button so the two things beside it read as the only
+   actions. */
+.selection-count {
+    color: var(--main-text);
+    padding: 0.5rem 0.25rem 0.5rem 0.5rem;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    opacity: 0.8;
+}

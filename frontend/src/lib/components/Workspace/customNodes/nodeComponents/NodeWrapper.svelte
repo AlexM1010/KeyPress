@@ -8,15 +8,18 @@
     import ContextMenu from "./ContextMenu.svelte";
     import { cubicOut } from "svelte/easing";
     import { onDestroy, getContext } from 'svelte';
-    import { graph } from "$lib/stores/flow.svelte";
+    import { duplicateNodes } from "$lib/stores/flow.svelte";
     import '$lib/index.scss';
 
     /**
-     * This file is in runes mode, and had to be: `handleDuplicate` reaches for
-     * `$state.snapshot`, a component is runes *or* legacy and never both, so the
-     * one rune drags the whole file across. The six node components that render
-     * this one are still legacy, which is fine in both directions - their default
-     * slot content arrives here as the `children` snippet.
+     * This file is in runes mode. It first had to be because `handleDuplicate`
+     * reached for `$state.snapshot` - a component is runes *or* legacy and never
+     * both, so the one rune dragged the whole file across - and it stays that way
+     * on its own account now that the duplicating moved to `duplicateNodes`:
+     * `$props`, `$state` and `$bindable` below are all runes, and going back
+     * would mean converting them too. The six node components that render this
+     * one are still legacy, which is fine in both directions - their default slot
+     * content arrives here as the `children` snippet.
      *
      * This wrapper deliberately takes no `data` prop. Svelte Flow hands each
      * custom node the very `data` object the graph holds, so the node components
@@ -101,35 +104,11 @@
     onDestroy(() => clearTimeout(hideTimer));
 
     // Event Handlers
+    // Duplicating one node is the same operation the selection toolbar performs
+    // on several, so it is one function in `$lib/stores/flow.svelte` rather than
+    // a copy here - see `duplicateNodes` for what the copy has to get right.
     function handleDuplicate() {
-        // Read from the graph rather than `getNode`: `<SvelteFlow>` writes drag
-        // positions straight back into it, so it holds the node's current position
-        // and is already typed as a `FlowNode`.
-        const node = graph.nodes.find((n) => n.id === id);
-        if (!node) return;
-
-        // `data` must be deep-copied. Every node component mutates the payload it is
-        // handed in place (that is how an edit reaches the graph), so a shallow copy
-        // would leave the clone editing the original's nested arrays and objects.
-        //
-        // `$state.snapshot` rather than the `structuredClone` this used to be, and
-        // not as a matter of taste: `graph.nodes` is deep `$state`, so `node.data`
-        // is a proxy, and `structuredClone` throws `DataCloneError` on a proxy
-        // rather than copying through it. The snapshot unwraps and deep-copies in
-        // one go, which is exactly what was wanted here anyway.
-        graph.nodes = [
-            ...graph.nodes,
-            {
-                ...node,
-                // Same id scheme as a node dropped from the palette (`onDrop` in
-                // Flow.svelte). Both sites have to agree: a duplicate is
-                // indistinguishable from any other node once it is on the canvas.
-                id: crypto.randomUUID(),
-                position: { x: node.position.x + 40, y: node.position.y + 40 },
-                data: $state.snapshot(node.data),
-                selected: false,
-            },
-        ];
+        duplicateNodes([id]);
     }
 
     function handleDelete() {

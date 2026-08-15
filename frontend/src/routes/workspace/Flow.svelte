@@ -24,6 +24,7 @@
     getSavedSnapshot,
     markMacroSaved,
     serializeMacro,
+    duplicateNodes,
     type FlowNode,
   } from "$lib/stores/flow.svelte";
   import { onLayout } from "$lib/utils/autoLayout";
@@ -70,6 +71,8 @@
     Loader,
     TriangleAlert,
     LayoutDashboard,
+    Copy,
+    Trash2,
   } from "lucide-svelte";
 
   import LeftPanel from './flowpanels/LeftPanel.svelte';
@@ -102,7 +105,7 @@
   const colorMode = $derived($flowTheme);
 
   // Destructure helper functions from useSvelteFlow
-  const { screenToFlowPosition } = useSvelteFlow();
+  const { screenToFlowPosition, deleteElements } = useSvelteFlow();
 
   /**
    * The graph on the canvas as plain objects, detached from the state the canvas
@@ -602,11 +605,52 @@
    * is worth reaching for.
    */
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key !== 's' && event.key !== 'S') return;
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-    // The browser's own "save page" would otherwise fire as well.
-    event.preventDefault();
-    handleSave();
+
+    if (event.key === 's' || event.key === 'S') {
+      // The browser's own "save page" would otherwise fire as well.
+      event.preventDefault();
+      handleSave();
+      return;
+    }
+
+    // Ctrl+D duplicates the selection. Guarded on there being one, so the
+    // shortcut falls through to the browser's bookmark dialog only when it would
+    // have done nothing here anyway.
+    if (event.key === 'd' || event.key === 'D') {
+      if (selectedNodeIds.length === 0) return;
+      event.preventDefault();
+      duplicateNodes(selectedNodeIds);
+    }
+  }
+
+  /**
+   * The ids Svelte Flow currently has selected.
+   *
+   * Read straight off `graph.nodes` rather than through the library's
+   * `useOnSelectionChange` hook, because the selection is already here: Svelte
+   * Flow writes `selected` back through `bind:nodes`, so this is the same answer
+   * the hook would deliver with one less thing subscribed. It costs nothing to
+   * recompute - `serializeMacro` deliberately leaves `selected` out, so a
+   * selection change re-runs the unsaved-changes check and correctly concludes
+   * that nothing about the macro changed.
+   */
+  const selectedNodeIds = $derived(
+    graph.nodes.filter((node) => node.selected).map((node) => node.id)
+  );
+
+  /** Duplicate/delete act on a selection only once there is more than one node
+   *  in it; a single node is already served by its own hover menu. */
+  const hasMultiSelection = $derived(selectedNodeIds.length > 1);
+
+  function duplicateSelection() {
+    duplicateNodes(selectedNodeIds);
+  }
+
+  function deleteSelection() {
+    // Through the flow helper, like the single-node delete in NodeWrapper, so
+    // the edges attached to each node are torn down with it.
+    deleteElements({ nodes: selectedNodeIds.map((id) => ({ id })) });
   }
 
   // Written out rather than inlined in the markup so the button's tooltip and
@@ -1100,6 +1144,43 @@
       deleteKey="Backspace"
       fitView
     >
+      <!-- Selection toolbar.
+
+           Only for a selection of more than one node: a single node already has
+           the same two actions on its own hover menu, and a bar that appeared
+           every time the user clicked something would be in the way rather than
+           useful.
+
+           It exists mostly because none of this was discoverable. Selecting
+           several nodes has always worked - click, Ctrl+click to add, Shift+drag
+           for a box - and Backspace has always deleted the lot, but nothing on
+           screen said so, and duplicate could only ever be reached one node at a
+           time through a menu that appears on hover. Naming the count is also
+           the only feedback that a box-drag caught what the user meant it to. -->
+      {#if hasMultiSelection}
+        <Panel position="top-left">
+          <div class="nav-button-container flex-center flex-gap" role="toolbar" aria-label="Selection actions">
+            <span class="selection-count">{selectedNodeIds.length} nodes selected</span>
+            <button
+              class="flow-button"
+              onclick={duplicateSelection}
+              title="Duplicate selection (Ctrl+D)"
+              aria-label="Duplicate selection"
+            >
+              <Copy class="w-4 h-4" />
+            </button>
+            <button
+              class="flow-button"
+              onclick={deleteSelection}
+              title="Delete selection (Backspace)"
+              aria-label="Delete selection"
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </div>
+        </Panel>
+      {/if}
+
       <!-- Control Panel -->
       <Panel position="top-right">
         <div class="flex flex-col items-end">
