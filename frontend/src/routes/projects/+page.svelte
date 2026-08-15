@@ -216,7 +216,7 @@
 			<div class="macros-confirm-actions">
 				<!-- Cancel first and focused: the safe answer should be the one a
 				     stray Enter gives. -->
-				<!-- svelte-ignore a11y-autofocus -->
+				<!-- svelte-ignore a11y_autofocus -->
 				<button
 					type="button"
 					class="macros-confirm-button"
