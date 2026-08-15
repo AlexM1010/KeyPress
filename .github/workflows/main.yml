@@ -1,37 +1,94 @@
-name: Wails macOS Build
+name: CI
 
+# Keypress is a Windows-first desktop app, so the whole gate runs on Windows:
+# robotgo needs cgo and the real Win32 headers, and the artifact we care about
+# is the .exe.
 on:
   push:
-    branches:
-      - main
+    branches: [master]
   pull_request:
-    branches:
-      - main
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  macos-build:
-    runs-on: macos-latest
+  build:
+    name: Vet, test, type-check and build
+    runs-on: windows-latest
+
+    env:
+      # robotgo drives the real mouse and keyboard through cgo; with CGO
+      # disabled it compiles down to its non-cgo stubs and the link fails on
+      # undefined symbols. Mirrors CGO_ENABLED in Taskfile.yml. The
+      # windows-latest image ships mingw-w64 gcc on PATH, which is what the
+      # race detector needs too.
+      CGO_ENABLED: 1
+
     steps:
-      # Checkout repository
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      # Use the Wails Build Action for macOS
-      - name: Build Wails Application for macOS
-        uses: dAppServer/wails-build-action@v2.2
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          build-name: myWailsApp
-          build-platform: darwin/universal
-          package: false # Disable artifact uploading since this is for sharing locally
+          # Read from go.mod (go 1.25.0 / toolchain go1.25.12) so the version
+          # can never drift from what the module declares.
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-      # Optional: Archive the build for download (if needed)
-      - name: Archive macOS Build
-        run: |
-          mkdir -p artifact
-          mv ./build/bin/* artifact/
-        # Upload as GitHub Actions artifact
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v3
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          name: macos-build
-          path: artifact
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run check
+
+      # Plain-TypeScript unit tests (node environment, no Svelte compilation),
+      # so they need neither the built frontend below nor a browser.
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+
+      # main.go does `//go:embed all:frontend/build`, and frontend/build is
+      # gitignored - so on a fresh checkout every Go command that loads package
+      # main (vet, build) fails until the frontend has been built. This step
+      # has to come before any of them.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        run: go test -race ./backend/...
+
+      # Compiles what `task build` (build/windows/Taskfile.yml -> build:native)
+      # compiles, with the same flags, but without going through the wails3
+      # CLI: v3 is beta and installing it plus go-task only to re-run steps we
+      # already did (bindings are committed, the frontend is built above) buys
+      # nothing but flakiness. The one thing skipped is `wails3 generate syso`,
+      # so this binary carries no embedded icon/manifest resources - use
+      # `task build` locally for a release build.
+      - name: Build Windows binary
+        run: go build -tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui" -o bin/Keypress.exe .
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: Keypress-windows-amd64
+          path: bin/Keypress.exe
+          if-no-files-found: error

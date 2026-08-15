@@ -6,7 +6,7 @@ An auto clicker with a visual flowchart interface for creating and executing com
 
 ## Overview
 
-Keypress combines a Go backend for system-level automation with a modern SvelteKit frontend, providing an intuitive drag-and-drop interface for building automation workflows. The application uses Wails v2 to bridge native desktop capabilities with web technologies.
+Keypress combines a Go backend for system-level automation with a modern SvelteKit frontend, providing an intuitive drag-and-drop interface for building automation workflows. The application uses Wails v3 to bridge native desktop capabilities with web technologies.
 
 ## Technical Stack
 
