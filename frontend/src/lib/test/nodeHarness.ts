@@ -80,5 +80,6 @@ export function persistedData(data: unknown, type = 'TestNode'): Record<string, 
 		[]
 	);
 
-	return JSON.parse(serialized).nodes[0].data;
+	const parsed = JSON.parse(serialized) as { nodes: { data: Record<string, unknown> }[] };
+	return parsed.nodes[0].data;
 }

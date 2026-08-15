@@ -144,7 +144,6 @@
 	// Available options
 	const PATH_TYPES: PathType[] = ['Straight', 'Human'];
 	const SPEED_TYPES: SpeedType[] = ['Instant', 'Human'];
-	const POSITION_TYPES: PositionType[] = ['Fixed', 'Mouse'];
 
 	// Constants
 	const CONFIG = {
@@ -165,10 +164,6 @@
 	} as const;
 
 	// Event handlers
-	// Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
-	// positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
-	// the "created with unknown prop" warnings for the ones we don't declare.
-	$$restProps;
 </script>
 
 <NodeWrapper {id} {icon} {title} {color} type="Move" {handles}>

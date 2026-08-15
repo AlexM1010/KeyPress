@@ -167,8 +167,6 @@
 
 	// Reactive declarations
 	$: macroDisplay = data.macroKeys.join('+');
-
-	$$restProps;
 </script>
 
 <NodeWrapper {icon} {title} {color} {handles} {isConnectable} {id} type="StartNode">

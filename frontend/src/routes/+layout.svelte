@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { ModeWatcher } from 'mode-watcher';
 	import ThemeToggle from './ThemeToggle.svelte';
 	import Logo from './Logo.svelte';
@@ -14,8 +15,8 @@
 	<!-- Left side of navbar -->
 	<div class="navbar-left">
 		<Logo customClass="logo" />
-		<button class="nav-btn" on:click={() => goto('/')}> Workspace </button>
-		<button class="nav-btn" on:click={() => goto('/projects')}> Projects </button>
+		<button class="nav-btn" on:click={() => goto(resolve('/'))}> Workspace </button>
+		<button class="nav-btn" on:click={() => goto(resolve('/projects'))}> Projects </button>
 	</div>
 	<!-- Right side of navbar -->
 	<div class="flex items-center">

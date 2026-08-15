@@ -9,7 +9,7 @@
 	// running, so it is fetched in the browser rather than at build time.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { base } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import {
 		FileWarning,
 		Inbox,
@@ -130,7 +130,7 @@
 			openMacroInWorkspace(macro);
 			// The workspace is the root route; there is no URL that carries the
 			// macro, which is why the graph is put in the stores first.
-			await goto(`${base}/`);
+			await goto(resolve('/'));
 		} catch (error) {
 			openState = { status: 'error', message: describeError(error) };
 		}

@@ -3,7 +3,7 @@
 	import { Clock } from 'lucide-svelte';
 	import NodeWrapper from './nodeComponents/NodeWrapper.svelte';
 	import type { ComponentType } from 'svelte';
-	import { Handle, Position } from '@xyflow/svelte';
+	import { Position } from '@xyflow/svelte';
 	import type { HandleConfig, DelayNodeData } from '$lib/stores/flow.svelte';
 	import TimeInput from './nodeComponents/TimeInput.svelte';
 	import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
@@ -48,11 +48,6 @@
 	function updateDelayType(newType: string) {
 		data.delayType = newType as 'Fixed' | 'Random';
 	}
-
-	// Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,
-	// positionAbsoluteX, ...) to every custom node. Referencing $$restProps silences
-	// the "created with unknown prop" warnings for the ones we don't declare.
-	$$restProps;
 </script>
 
 <NodeWrapper {id} {icon} {title} {color} type="Delay" {handles}>

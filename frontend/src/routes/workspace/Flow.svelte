@@ -157,7 +157,7 @@
 	// Handle drag over event to allow dropping nodes onto the flow
 	const onDragOver = (event: DragEvent) => {
 		event.preventDefault();
-		event.dataTransfer && (event.dataTransfer.dropEffect = 'move');
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 	};
 
 	// Handle drop event to add new nodes to the flow

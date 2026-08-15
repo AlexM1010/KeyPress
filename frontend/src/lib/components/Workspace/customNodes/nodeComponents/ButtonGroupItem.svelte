@@ -1,7 +1,6 @@
 <!-- ButtonGroupItem.svelte -->
 <script lang="ts">
 	import { getContext, onMount, onDestroy } from 'svelte';
-	import { cn } from '$lib/utils/buttonUtils';
 	import { derived } from 'svelte/store';
 	import '$lib/index.scss';
 
@@ -11,7 +10,10 @@
 		items: import('svelte/store').Writable<string[]>;
 	}
 
-	export let value: any = undefined;
+	// Required: every call site passes one, and it becomes the id this button
+	// registers with its ButtonGroup. It was `any` with an `undefined` default,
+	// which let `undefined` reach `register(id: string)` unchecked.
+	export let value: string;
 	export let className: string | undefined = undefined;
 	export { className as class };
 

@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { SvelteComponent } from 'svelte';
+	import type { ComponentType } from 'svelte';
 
 	export let label: string;
 	export let type: string = 'text';
 	export let defaultValue: string = '';
-	export let icon: typeof SvelteComponent<any> | null = null;
+	export let icon: ComponentType | null = null;
 </script>
 
 <div class="space-y-1.5">

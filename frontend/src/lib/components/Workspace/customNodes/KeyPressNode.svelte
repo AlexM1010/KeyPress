@@ -280,8 +280,6 @@
 	function selectCharacter(event: Event): void {
 		(event.currentTarget as HTMLInputElement).select();
 	}
-
-	$$restProps;
 </script>
 
 <NodeWrapper {icon} {title} {color} {id} type="KeyPressNode" {handles}>

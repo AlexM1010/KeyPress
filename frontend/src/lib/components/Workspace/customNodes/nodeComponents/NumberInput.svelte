@@ -19,7 +19,7 @@
 	export let step: number = 1;
 	export let showArrows: boolean = true;
 
-	let isInvalid: boolean = false;
+	let isInvalid: boolean;
 
 	function increment() {
 		if (maxValue === null || value + step <= maxValue) {

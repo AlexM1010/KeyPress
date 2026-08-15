@@ -1,10 +1,10 @@
 <!-- Select.svelte -->
 <script lang="ts">
-	import type { SvelteComponent } from 'svelte';
+	import type { ComponentType } from 'svelte';
 
 	export let label: string;
 	export let options: string[];
-	export let icon: typeof SvelteComponent<any> | null = null;
+	export let icon: ComponentType | null = null;
 	export let value: string = '';
 
 	// The DOM id of the <select>, tying it to its <label for=...>. It used to be

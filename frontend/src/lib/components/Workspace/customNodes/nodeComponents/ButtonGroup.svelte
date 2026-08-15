@@ -12,9 +12,6 @@
 	// Create a store to track the order of ButtonGroupItems
 	const items = writable<string[]>([]);
 
-	// Silence warnings for unknown props
-	$$restProps;
-
 	// Provide context to child ButtonGroupItems
 	setContext('buttonGroupCtx', {
 		register: (id: string) => {

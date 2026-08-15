@@ -9,7 +9,6 @@
 	 *  - Fix edge path hover detection -
 	 */
 
-	import type { Position } from '@xyflow/svelte';
 	import { getBezierPath, BaseEdge, type EdgeProps, EdgeLabel, useEdges } from '@xyflow/svelte';
 	import { X } from 'lucide-svelte';
 	import { cubicOut } from 'svelte/easing';
@@ -35,18 +34,6 @@
 		timeoutId: ReturnType<typeof setTimeout> | null;
 		isHovered: boolean;
 		id: string;
-	}
-
-	interface CustomEdgeProps extends EdgeProps {
-		id: string;
-		sourceX: number;
-		sourceY: number;
-		sourcePosition: Position;
-		targetX: number;
-		targetY: number;
-		targetPosition: Position;
-		markerEnd?: string;
-		style?: string;
 	}
 
 	// Configuration Constants
@@ -296,8 +283,6 @@
 			}
 		};
 	}
-
-	$$restProps; // Silence warnings
 </script>
 
 <!-- Arrow marker definition 

@@ -60,7 +60,7 @@
 
 	let displayValue: number;
 	let inputWidth: string;
-	let isInvalid: boolean = false;
+	let isInvalid: boolean;
 
 	$: nextUnit = UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length];
 

@@ -31,6 +31,21 @@ export default defineConfig(
 	{
 		languageOptions: {
 			globals: { ...globals.browser, ...globals.node }
+		},
+		rules: {
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{
+					// Naming a prop only to keep it out of `...rest` is a real use of
+					// it - NodeWrapper destructures `type` for exactly that reason, so
+					// that a caller's `type="Delay"` does not get spread onto a `<div>`.
+					ignoreRestSiblings: true,
+					// The usual escape hatch for a binding that must exist but is not read.
+					varsIgnorePattern: '^_',
+					argsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_'
+				}
+			]
 		}
 	},
 

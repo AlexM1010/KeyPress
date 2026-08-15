@@ -199,7 +199,7 @@ describe('MouseMoveNode', () => {
 		expect(persisted(data).startPosition.coordinates).toEqual({ x: 120, y: 240 });
 	});
 
-	it('refuses to take both endpoints from the live cursor', async () => {
+	it('refuses to take both endpoints from the live cursor', () => {
 		const { data } = renderNode(
 			MouseMoveNode,
 			savedPayload({ startPosition: { type: 'Mouse', coordinates: { x: 0, y: 0 } } })

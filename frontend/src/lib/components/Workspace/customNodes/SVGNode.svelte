@@ -63,8 +63,6 @@
 				return '';
 		}
 	}
-
-	$$restProps; // Silence warnings
 </script>
 
 <div class="node-wrapper" class:selected style="width: {nodeWidth}px; height: {nodeHeight}px">

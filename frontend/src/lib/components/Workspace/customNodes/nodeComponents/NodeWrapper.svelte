@@ -82,7 +82,6 @@
 	const isPreview: boolean = getContext('nodePreview') === true;
 
 	// UI State Management
-	let isHovered = $state(false);
 	let isHeaderHovered = $state(false);
 
 	// The context menu floats above the header, so the pointer momentarily leaves
@@ -138,8 +137,6 @@
 
 <div
 	class="node-wrapper relative transition-all duration-300 overflow-visible"
-	onmouseenter={() => (isHovered = true)}
-	onmouseleave={() => (isHovered = false)}
 	role="region"
 	{...rest}
 >
