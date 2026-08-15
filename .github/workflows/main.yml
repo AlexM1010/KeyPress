@@ -3,9 +3,12 @@ name: CI
 # Keypress is a Windows-first desktop app, so the whole gate runs on Windows:
 # robotgo needs cgo and the real Win32 headers, and the artifact we care about
 # is the .exe.
+# Every branch is gated, not just master: the point of the suite is to catch a
+# regression while the work is still in progress, and a gate that only runs
+# after the merge has already missed its moment.
 on:
   push:
-    branches: [master]
+    branches: ['**']
   pull_request:
     branches: [master]
 
@@ -20,6 +23,14 @@ jobs:
   build:
     name: Vet, test, type-check and build
     runs-on: windows-latest
+
+    # With every branch building on push, a pull request from a branch in this
+    # repo would otherwise run the whole suite twice over the same commit. Fork
+    # pull requests get no push event here, so they are the one case that still
+    # needs the pull_request trigger above.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
 
     env:
       # robotgo drives the real mouse and keyboard through cgo; with CGO
