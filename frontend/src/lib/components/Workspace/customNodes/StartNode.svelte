@@ -9,7 +9,7 @@
     import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
     import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
-    import { markGraphEdited, type HandleConfig, type StartNodeData } from '$lib/stores/flow';
+    import type { HandleConfig, StartNodeData } from '$lib/stores/flow.svelte';
     import '$lib/index.scss';
 
     // Type definitions for OS-specific key mappings
@@ -56,9 +56,14 @@
     };
 
     // Svelte Flow passes the node's data payload here, not the whole node - and it
-    // is the *same object* the flow store holds, so every edit below lands in the
-    // store by reference and is picked up by `toObject()` on save. The recorded
-    // macro therefore has to live on `data`, never in a local `let`.
+    // is the *same object* the graph holds, so every edit below lands in the graph
+    // by reference and is what gets saved. The recorded macro therefore has to
+    // live on `data`, never in a local `let`.
+    //
+    // That reference is the whole of the contract now. The graph's nodes are deep
+    // `$state` (see `$lib/stores/flow.svelte`), so assigning `data.macroKeys` is an
+    // ordinary tracked write and the edit *is* its own notification - nothing has
+    // to be announced afterwards.
     export let data: StartNodeData = { ...DEFAULT_DATA };
 
     // Persisted nodes can predate newer fields, so backfill whatever is missing
@@ -123,8 +128,9 @@
 
         const key = event.key;
         if (!data.macroKeys.includes(key)) {
-            // Assigning the property (rather than pushing) keeps Svelte's
-            // reactivity while still writing through to the store's object.
+            // A fresh array rather than a push, so the write is visible to
+            // this file's legacy `$:` statements as well as to the graph's
+            // deep `$state`.
             data.macroKeys = [...data.macroKeys, key];
         }
     }
@@ -154,27 +160,6 @@
 
     // Reactive declarations
     $: macroDisplay = data.macroKeys.join('+');
-
-    /**
-     * The other half of the by-reference contract: mutating `data` puts the edit
-     * in the store, this announces it. Recording a macro assigns
-     * `data.macroKeys`, which invalidates `data` here and re-runs this - see
-     * `markGraphEdited`.
-     *
-     * Declared last, as it is in every node component: a reactive statement that
-     * writes `data` through a function call is invisible to the compiler, so
-     * source order is all that keeps its write on the announcing side of this
-     * one (see the longer note in `KeyPressNode.svelte`). Anything that comes to
-     * write `data` reactively belongs above this.
-     *
-     * The backfill above is a plain call that assigns nothing, so it does not
-     * fire this. The once-on-init run does, and is harmless: the unsaved-changes
-     * baseline is taken a frame after the nodes mount.
-     */
-    $: {
-        data;
-        markGraphEdited();
-    }
 
     $$restProps
 </script>

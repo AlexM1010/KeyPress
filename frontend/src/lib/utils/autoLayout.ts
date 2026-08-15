@@ -5,8 +5,7 @@ import {
     type Edge,
 } from "@xyflow/svelte";
 import "@xyflow/svelte/dist/style.css";
-import { get } from "svelte/store";
-import { nodesData, edgesData, type FlowNode } from "$lib/stores/flow";
+import { graph, type FlowNode } from "$lib/stores/flow.svelte";
 
 /**
  * Size to reserve for a node whose real size cannot be read yet - one that has
@@ -36,7 +35,7 @@ const GRAPH_MARGIN = 48;
  * The size a node actually occupies on the canvas.
  *
  * Svelte Flow measures every rendered node and writes the result back onto the
- * very object held in `nodesData` (`measured`), so that is the first and best
+ * very object held in `graph.nodes` (`measured`), so that is the first and best
  * source. It is absent until the node has been through a render, hence the two
  * fallbacks: the node's own DOM box - `offsetWidth`/`offsetHeight`, which are
  * layout sizes and so unaffected by the canvas zoom transform or the hover
@@ -111,10 +110,12 @@ function getLayoutedElements(
 
     dagre.layout(dagreGraph);
 
-    // New node objects rather than mutation, so the store assignment below is a
-    // real change to Svelte Flow. `data` is passed through by reference on
-    // purpose: custom node components edit the payload they were handed in
-    // place, and copying it here would cut those edits off from the store.
+    // New node objects rather than mutation. Deep `$state` would notice either
+    // way now, so this is no longer about being seen; it is about not editing
+    // the caller's nodes in a function that may yet decide to place them
+    // elsewhere. `data` is spread through by reference on purpose: it is the
+    // very `$state` proxy the node component writes its edits into, and copying
+    // it here would cut those edits off from the graph.
     const layoutedNodes = nodes.map((node) => {
         const positioned = dagreGraph.node(node.id);
         if (!positioned) return node;
@@ -185,8 +186,13 @@ function placeIsolatedNodes(laidOut: Node[], isolated: Node[]): Node[] {
  * result by `placeIsolatedNodes`.
  */
 function onLayout(direction: string = "LR") {
-    const nodesValue = get(nodesData) as Node[];
-    const edgesValue = get(edgesData);
+    // Read straight off the graph rather than through `get(store)`: the nodes
+    // and edges are `$state` fields on an exported object now, so a property
+    // read *is* the current value. This module has no reactive machinery of its
+    // own and needs none - `onLayout` is called from a click, does its work
+    // once, and assigns the result back.
+    const nodesValue = graph.nodes as Node[];
+    const edgesValue = graph.edges;
 
     const nodeIds = new Set(nodesValue.map((node) => node.id));
     // An edge whose endpoints are not both on the canvas connects nothing, and
@@ -209,12 +215,12 @@ function onLayout(direction: string = "LR") {
         placed.set(node.id, node),
     );
 
-    // Rebuilt in the store's own order: Svelte Flow paints nodes in array
+    // Rebuilt in the graph's own order: Svelte Flow paints nodes in array
     // order, so reordering them here would silently restack the canvas.
     const nextNodes = nodesValue.map((node) => placed.get(node.id) ?? node);
 
-    nodesData.set(nextNodes as FlowNode[]);
-    edgesData.set(layoutedElements.edges);
+    graph.nodes = nextNodes as FlowNode[];
+    graph.edges = layoutedElements.edges;
 }
 
 export { onLayout };

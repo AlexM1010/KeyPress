@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { fireEvent, screen } from '@testing-library/svelte';
-import { nodesData } from '$lib/stores/flow';
+import { graph } from '$lib/stores/flow.svelte';
 import { persistedData, renderNode } from '$lib/test/nodeHarness';
 import KeyPressNode from './KeyPressNode.svelte';
 
@@ -209,33 +209,32 @@ describe('KeyPressNode', () => {
 		expect(modifiers).toEqual(['Windows']);
 	});
 
-	it('announces a ticked modifier only once it has reached the payload', async () => {
+	it('puts a ticked modifier into the payload the graph holds', async () => {
 		const data = saved();
 
-		// The workspace answers "does this differ from the file?" by re-serialising
-		// the graph whenever the node store announces an edit, so an announcement
-		// that goes out *before* the write is worth nothing - it reports the payload
-		// as it was.
-		nodesData.set([{ id: 'test-node-1', type: 'KeyPressNode', position: { x: 0, y: 0 }, data }]);
-
-		const announced: string[][] = [];
-		const stopListening = nodesData.subscribe((nodes) => {
-			announced.push([...((nodes[0].data as KeyPressData).modifiers ?? [])]);
-		});
+		// The node under test *is* the node on the canvas, sharing one payload
+		// object - which is the arrangement the whole by-reference contract exists
+		// to describe, and the one the workspace re-serialises to answer "does this
+		// differ from the file?".
+		graph.nodes = [{ id: 'test-node-1', type: 'KeyPressNode', position: { x: 0, y: 0 }, data }];
 
 		renderNode(KeyPressNode, data);
 		await fireEvent.click(screen.getByLabelText('Ctrl'));
-		stopListening();
 
-		// This is the safety net for a documented ordering hazard: `syncModifiers`
-		// writes `data.modifiers` from inside a reactive statement, the compiler
-		// cannot see that through the function call, and Svelte then runs the
-		// reactive blocks in source order. With the `markGraphEdited` block above
-		// `syncModifiers` the tick lands after the announcement has gone out and
-		// produces *zero* notifications carrying it - the macro looks saved while
-		// the file has no Ctrl in it. Asserted through the store rather than by
-		// counting calls, so it still means the same thing after the Svelte 5
-		// migration rewrites how the ordering is expressed.
-		expect(announced.at(-1)).toEqual(['Ctrl']);
+		// Read back through the graph rather than through `data`, so this fails if
+		// the component ever reassigns its payload instead of editing it: the graph
+		// would still be holding the object the component walked away from, and the
+		// macro would save without the modifier the user can plainly see ticked.
+		//
+		// This used to be the safety net for an ordering hazard - `syncModifiers`
+		// wrote `data.modifiers` from inside a reactive statement, invisibly to the
+		// compiler, so only source order kept that write on the announcing side of
+		// the block that called `markGraphEdited`, and getting it wrong produced
+		// zero notifications carrying the tick. Svelte Flow 1.x retired that: the
+		// graph holds its nodes in deep `$state`, an in-place write is tracked, and
+		// there is no announcement left to order against. What the test is really
+		// for survives the mechanism, so it is asked of the graph directly.
+		const held = graph.nodes[0].data as KeyPressData;
+		expect(held.modifiers).toEqual(['Ctrl']);
 	});
 });

@@ -1,30 +1,33 @@
 <!-- SVGNode.svelte -->
 <script lang="ts">
-  import { Handle, Position, type Node } from "@xyflow/svelte";
+  import { Handle, Position, type NodeProps } from "@xyflow/svelte";
   import type { SVGNodeData, HandleConfig } from "./types";
 
-  type $$Props = {
-    id: string;
-    data: SVGNodeData;
-    width?: number;
-    height?: number;
-    dragHandle?: boolean;
-    type?: string;
-    selected?: boolean;
-    isConnectable?: boolean;
-    zIndex?: number;
-    positionAbsolute: { x: number; y: number };
-    dragging: boolean;
-    targetPosition?: Position;
-    sourcePosition?: Position;
-  };
+  /**
+   * The props Svelte Flow hands a custom node, taken from the library's own
+   * `NodeProps` rather than spelled out by hand.
+   *
+   * The hand-written list this replaces had drifted into being wrong: it
+   * declared `positionAbsolute: { x, y }` and a required `dragging`, and 1.x
+   * passes neither - the absolute position now arrives as the two scalars
+   * `positionAbsoluteX` / `positionAbsoluteY`. A wrong shape here is not
+   * cosmetic, because `nodeTypes.ts` assigns this component into
+   * `NodeTypes`: a prop this file claims to require that the library never
+   * passes makes the component unassignable, which is exactly how the drift
+   * surfaced. Borrowing the library's type means the list cannot drift again.
+   *
+   * Only `data` is narrowed, to the payload this node actually draws.
+   */
+  type $$Props = NodeProps & { data: SVGNodeData };
 
   export let id: $$Props["id"];
   // Read-only, unlike every other node's payload: this node draws whatever
   // shape, size and label it is handed and offers the user no control that
-  // could change any of them. That is why it is the one node component with no
-  // `markGraphEdited()` call - it has no edit to announce. Give it an editable
-  // control and it needs one, the way the others do.
+  // could change any of them. Nothing here writes to `data`, so nothing here
+  // marks the graph dirty - and unlike the other node components, that takes no
+  // effort to arrange. Give it an editable control and the write alone is
+  // enough: `data` is deep `$state`, so an in-place edit is tracked by
+  // construction (see `flow.svelte.ts`).
   export let data: $$Props["data"];
   export let selected: $$Props["selected"] = false;
   export let isConnectable: $$Props["isConnectable"] = true;

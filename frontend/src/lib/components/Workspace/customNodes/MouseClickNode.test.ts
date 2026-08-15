@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen } from '@testing-library/svelte';
 import { persistedData, renderNode } from '$lib/test/nodeHarness';
 import MouseClickNode from './MouseClickNode.svelte';
-import type { MouseClickNodeData } from '$lib/stores/flow';
+import type { MouseClickNodeData } from '$lib/stores/flow.svelte';
 
 /**
  * A saved payload with every field set to something other than its default, so a

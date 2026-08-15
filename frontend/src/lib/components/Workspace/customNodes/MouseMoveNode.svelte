@@ -12,7 +12,6 @@
     import TimeInput from './nodeComponents/TimeInput.svelte';
     import ButtonGroup from "./nodeComponents/ButtonGroup.svelte";
     import ButtonGroupItem from "./nodeComponents/ButtonGroupItem.svelte";
-    import { markGraphEdited } from '$lib/stores/flow';
     import type { HandleConfig } from './types';
 
     // Type definitions
@@ -47,10 +46,16 @@
     };
 
     // Props.
-    // `data` is the very object the flow store holds for this node, so the edits
-    // below (and the backfill further down) mutate it in place and are picked up by
-    // `toObject()` on save. Never reassign `data` - that detaches the component
-    // from the store and silently drops every edit.
+    // `data` is the very object the graph holds for this node, so the edits below
+    // (and the backfill further down) mutate it in place and are what gets saved.
+    // Never reassign `data` - that detaches the component from the graph's object
+    // and silently drops every edit.
+    //
+    // That reference is the whole of the contract now. The graph's nodes are deep
+    // `$state` (see `$lib/stores/flow.svelte`), so an in-place write is an ordinary
+    // tracked write and the edit *is* its own notification - the deep ones
+    // (`data.startPosition.coordinates.x`) included, which is what deep state buys
+    // over the raw kind Svelte Flow's own docs reach for.
     export let id: string;
     export let title: string = 'Mouse Move';
     export let icon: ComponentType = Mouse;
@@ -133,30 +138,6 @@
             MAX: 100
         }
     } as const;
-
-    /**
-     * The other half of the by-reference contract: mutating `data` puts the edit
-     * in the store, this announces it. Every binding and handler in this file
-     * assigns to a property of `data` - the deep ones
-     * (`data.startPosition.coordinates.x`) included, because Svelte invalidates
-     * the whole `data` variable for an assignment anywhere along that path -
-     * which re-runs this; see `markGraphEdited`.
-     *
-     * Declared last, as it is in every node component: a reactive statement that
-     * writes `data` through a function call is invisible to the compiler, so
-     * source order is all that keeps its write on the announcing side of this
-     * one (see the longer note in `KeyPressNode.svelte`). The consistency block
-     * above writes `data` directly, which the compiler *can* see, so that one is
-     * ordered before this whatever the source says.
-     *
-     * A node opened from a file that predates one of those fields therefore
-     * announces one edit as it mounts. That is harmless: the unsaved-changes
-     * baseline is taken a frame after the nodes mount.
-     */
-    $: {
-        data;
-        markGraphEdited();
-    }
 
     // Event handlers
     // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,

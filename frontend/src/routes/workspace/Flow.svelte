@@ -10,12 +10,11 @@
     ConnectionMode,
     useSvelteFlow,
   } from "@xyflow/svelte";
-  import type { DefaultEdgeOptions } from "@xyflow/svelte";
+  import type { DefaultEdgeOptions, Edge } from "@xyflow/svelte";
 
   // Import custom nodes, edges, and utilities
   import {
-    nodesData,
-    edgesData,
+    graph,
     macroName,
     macroID,
     isWorkspaceHydrated,
@@ -26,7 +25,7 @@
     markMacroSaved,
     serializeMacro,
     type FlowNode,
-  } from "$lib/stores/flow";
+  } from "$lib/stores/flow.svelte";
   import { onLayout } from "$lib/utils/autoLayout";
   import { describeBackendError, isBackendUnreachable } from "$lib/utils/helpers";
 
@@ -80,27 +79,67 @@
 
   // NOTE: node edits do not travel back up through Svelte events. `<SvelteFlow>`
   // instantiates the custom node components itself from `nodeTypes`, so they are not
-  // children of this component and a `createEventDispatcher` event from one of them
-  // has no path to a listener here. Instead, Svelte Flow hands each node component
-  // the very `data` object held in the `nodesData` store, and the components mutate
-  // that payload in place - so `toObject()` below already sees the user's edits.
+  // children of this component and an event dispatched from one of them has no path
+  // to a listener here. Instead, Svelte Flow hands each node component the very
+  // `data` object held in `graph.nodes`, and the components mutate that payload in
+  // place - so a snapshot of `graph` already carries the user's edits.
   //
-  // Mutating is only half of the contract. An in-place edit changes no store
-  // reference, so each node component follows it with `markGraphEdited()`, whose
-  // identity update fires the store's subscriptions without replacing anything
-  // in it. That is the only thing that tells this component an edit happened at
-  // all, and the unsaved-changes check below runs off it.
+  // Mutating used to be only half of the contract. With the `nodesData` store an
+  // in-place edit changed no store reference and so announced nothing, and every
+  // node component had to follow the edit with a `markGraphEdited()` whose identity
+  // update fired the store's subscriptions. `graph` is deep `$state` now, so the
+  // write to `data` is itself a tracked write: the unsaved-changes effect below
+  // re-reads the graph *because of* it, with nothing in between. `markGraphEdited`
+  // no longer exists.
+  //
+  // Traffic runs the other way too. Svelte Flow writes drag positions, selection
+  // and deletions back into the same arrays - it shallow-copies the node and keeps
+  // the same `data` object, so a payload a node component is holding survives the
+  // replacement. That is what `bind:nodes` / `bind:edges` below are for: without
+  // the `bind:` those writes have nowhere to land.
 
   // Reactive statement to sync color mode with flow theme
-  $: colorMode = $flowTheme;
+  const colorMode = $derived($flowTheme);
 
   // Destructure helper functions from useSvelteFlow
-  const { toObject, screenToFlowPosition } = useSvelteFlow();
+  const { screenToFlowPosition } = useSvelteFlow();
+
+  /**
+   * The graph on the canvas as plain objects, detached from the state the canvas
+   * holds.
+   *
+   * This is what `toObject()` used to be, and it had to stop being `toObject()`:
+   * 1.x implements that as `structuredClone({ nodes: [...store.nodes], ... })`,
+   * and every node in there is a `$state` proxy - `structuredClone` throws
+   * `DataCloneError` on a proxy. `$state.snapshot` is the deep copy that
+   * understands them, so it is what every path out of this component goes
+   * through: both calls to the Go backend, and the serialisation the
+   * unsaved-changes check compares.
+   *
+   * Nothing is lost by dropping `toObject`. Its `nodes` and `edges` were copies
+   * of the very arrays bound to `<SvelteFlow>`, so reading `graph` reads the
+   * same graph one step earlier; its third field, the viewport, was never read -
+   * it rode along in the JSON handed to `StartExecution`, where Go's decoder
+   * ignored it.
+   */
+  function currentGraph(): { nodes: FlowNode[]; edges: Edge[] } {
+    // Widened on the way in and narrowed again on the way out. `Snapshot<T>` is
+    // a recursive conditional type, and asking TypeScript to compute it for a
+    // Svelte Flow node is asking it to walk the whole `Node` type - it gives up
+    // with "type instantiation is excessively deep and possibly infinite".
+    // `unknown[]` stops it descending. The values are the same either way; only
+    // the type of the expression differs, and this function's signature is what
+    // states it.
+    return {
+      nodes: $state.snapshot(graph.nodes as unknown[]) as FlowNode[],
+      edges: $state.snapshot(graph.edges as unknown[]) as Edge[],
+    };
+  }
 
   // State variables
-  let isStatusPanelExpanded = false;
-  let isExecuting = false;
-  let isLeftPanelExpanded = true;
+  let isStatusPanelExpanded = $state(false);
+  let isExecuting = $state(false);
+  let isLeftPanelExpanded = $state(true);
 
   // Toggle the status panel expansion
   function toggleStatusPanel() {
@@ -141,7 +180,7 @@
       data: {},
     };
 
-    $nodesData = [...$nodesData, newNode];
+    graph.nodes = [...graph.nodes, newNode];
   };
 
   // Status messages
@@ -150,32 +189,31 @@
   // out of `message` on purpose - node ids are random UUIDs and mean nothing
   // to a user - but carried alongside it so the panel can still surface it for
   // debugging (see StatusPanel's tooltip).
-  let statusMessages: {
+  let statusMessages = $state<{
     id: string;
     type: string;
     message: string;
     nodeId?: string;
-  }[] = [];
-  let isSuccess = false;
+  }[]>([]);
+  let isSuccess = $state(false);
 
   // Skipped-node highlight
   // ----------------------
   // Ids the backend reported as connected but unreachable from Start on the
-  // most recent run. Held on their own, deliberately NOT on the nodes: Svelte
-  // Flow's `toObject()` shallow-copies the very objects in the `nodesData`
-  // store, so a `class` (or any other marker) written onto a node would be
-  // handed straight to `SaveFile` and live in the user's macro JSON forever.
-  // The same rule that forbids it is the by-reference data contract - node
-  // components mutate their `data` payload in place, so `data` is the user's,
-  // not a place to park display state.
+  // most recent run. Held on their own, deliberately NOT on the nodes: the
+  // node objects in `graph.nodes` are the ones handed to `SaveFile`, so a
+  // `class` (or any other marker) written onto a node would live in the user's
+  // macro JSON forever. The same rule that forbids it is the by-reference data
+  // contract - node components mutate their `data` payload in place, so `data`
+  // is the user's, not a place to park display state.
   //
   // Instead the ids are turned into a stylesheet keyed on the `data-id`
   // attribute Svelte Flow already renders on every `.svelte-flow__node`
   // wrapper (NodeWrapper.svelte: `data-id={id}`), which marks exactly the
   // reported nodes without the graph data being touched at all.
-  let skippedNodeIds: string[] = [];
+  let skippedNodeIds = $state<string[]>([]);
 
-  $: skippedGlowCss = buildSkippedGlowCss(skippedNodeIds);
+  const skippedGlowCss = $derived(buildSkippedGlowCss(skippedNodeIds));
 
   // Active-node highlight
   // ---------------------
@@ -187,7 +225,7 @@
   // A list rather than a single id because the run is concurrent - the worker
   // pool in `taskqueue.go` runs several tasks at once, so two branches of a
   // flow really can be lit at the same time, and that is worth seeing.
-  let activeNodeIds: string[] = [];
+  let activeNodeIds = $state<string[]>([]);
 
   /**
    * id -> the `--node-glow-*` property that node lights up in, frozen for the
@@ -198,9 +236,9 @@
    * has an entry and no node changes colour half-way through a run because the
    * canvas was edited underneath it.
    */
-  let nodeGlows = new Map<string, string>();
+  let nodeGlows = $state(new Map<string, string>());
 
-  $: activeGlowCss = buildActiveGlowCss(activeNodeIds, nodeGlows);
+  const activeGlowCss = $derived(buildActiveGlowCss(activeNodeIds, nodeGlows));
 
   /**
    * id -> label, frozen for the duration of one run.
@@ -209,7 +247,7 @@
    * task the backend can report on has an entry and no node changes label
    * half-way through a run.
    */
-  let nodeLabels = new Map<string, NodeLabel>();
+  let nodeLabels = $state(new Map<string, NodeLabel>());
 
   // `nodeLabel` and `inFlowOrder` are thin bindings of the pure lookups in
   // `nodeLabels.ts` to the snapshot above. They are kept as one-argument
@@ -219,21 +257,33 @@
   const nodeLabel = (nodeId: string) => labelForNodeId(nodeLabels, nodeId);
   const inFlowOrder = (nodeIds: string[]) => orderIdsByStep(nodeLabels, nodeIds);
 
-  $: hasError = statusMessages.some((msg) => msg.type === "error");
-  $: hasWarning = statusMessages.some((msg) => msg.type === "warning");
-  $: hasSuccess = statusMessages.some(
-    (msg) =>
-      msg.type === "success" && msg.message.includes("Flow execution completed")
+  const hasError = $derived(statusMessages.some((msg) => msg.type === "error"));
+  const hasWarning = $derived(statusMessages.some((msg) => msg.type === "warning"));
+  const hasSuccess = $derived(
+    statusMessages.some(
+      (msg) =>
+        msg.type === "success" && msg.message.includes("Flow execution completed")
+    )
   );
 
+  /**
+   * The icon-and-colour pair the run button and the status panel share.
+   *
+   * Annotated with one concrete icon type rather than left to inference. Every
+   * Lucide icon has the same props, but the four branches below infer as four
+   * different component types, and a union of component constructors is not
+   * something a `<RunIcon />` tag can be typed against.
+   */
+  type ExecutionStatus = { icon: typeof Play; color: string };
+
   // Computed property to determine the current execution status and icon
-  $: executionStatus = (() => {
+  const executionStatus = $derived.by((): ExecutionStatus => {
     if (isExecuting) return { icon: Loader, color: "text-blue-500" };
     if (hasError) return { icon: X, color: "text-red-500" };
     if (hasWarning) return { icon: TriangleAlert, color: "text-yellow-500" };
     if (hasSuccess) return { icon: Play, color: "text-green-500" };
     return { icon: Play, color: "text-foreground" };
-  })();
+  });
 
   /**
    * How long the run button holds the alert glyph after a run that errored or
@@ -246,27 +296,38 @@
   // the alert glyph for a moment. Nothing is lost by handing it back to Play:
   // the status panel keeps its own icon on the failure, and its messages stay
   // until the next run clears them.
-  let isRunAlertHeld = false;
-  let runAlertTimer: ReturnType<typeof setTimeout> | undefined;
+  let isRunAlertHeld = $state(false);
 
-  $: hasRunAlert = !isExecuting && (hasError || hasWarning);
+  const hasRunAlert = $derived(!isExecuting && (hasError || hasWarning));
 
-  $: {
-    clearTimeout(runAlertTimer);
-    if (hasRunAlert) {
-      isRunAlertHeld = true;
-      runAlertTimer = setTimeout(() => (isRunAlertHeld = false), RUN_ALERT_HOLD_MS);
-    } else {
+  // The timer is owned by the effect that starts it, so it needs no variable of
+  // its own and no line in `onDestroy`: Svelte runs the returned cleanup both
+  // when `hasRunAlert` changes again and when the component goes away, which is
+  // exactly the set of moments a pending hold has to be cancelled.
+  $effect(() => {
+    if (!hasRunAlert) {
       isRunAlertHeld = false;
+      return;
     }
-  }
 
-  $: runButtonStatus =
+    isRunAlertHeld = true;
+    const timer = setTimeout(() => (isRunAlertHeld = false), RUN_ALERT_HOLD_MS);
+    return () => clearTimeout(timer);
+  });
+
+  const runButtonStatus = $derived(
     hasRunAlert && !isRunAlertHeld
       ? { icon: Play, color: "text-foreground" }
-      : executionStatus;
+      : executionStatus
+  );
 
-  onDestroy(() => clearTimeout(runAlertTimer));
+  /**
+   * The run button's glyph, pulled out of `runButtonStatus` so the markup can
+   * render it as a tag. `{@const}` would be the obvious way to name a component
+   * in the template, but it is only allowed as the immediate child of a block,
+   * and this one sits inside a `<button>`.
+   */
+  const RunIcon = $derived(runButtonStatus.icon);
 
   // Custom edge types
   const edgeTypes = {
@@ -296,8 +357,8 @@
       skippedNodeIds = [];
       clearActiveNodes();
 
-      // Get the current flow data as an object
-      const currentFlowData = toObject();
+      // Get the current flow data as plain objects
+      const currentFlowData = currentGraph();
 
       // Check if the flow contains a Start node
       const hasStartNode = currentFlowData.nodes.some(
@@ -352,19 +413,30 @@
   }
 
   // Function to handle saving the flow
-  type SaveState = 
+  type SaveState =
     | { status: 'idle' }
     | { status: 'saving' }
     | { status: 'success' }
     | { status: 'error', message: string };
 
-  let saveState: SaveState = { status: 'idle' };
+  let saveState = $state<SaveState>({ status: 'idle' });
+
+  /**
+   * The save button's glyph. Named for the same reason `RunIcon` is - see there.
+   * Annotated with one icon type because the four branches infer as four.
+   */
+  const SaveIcon: typeof Save = $derived(
+    saveState.status === 'saving' ? Loader :
+    saveState.status === 'error' ? X :
+    saveState.status === 'success' ? Check :
+    Save
+  );
 
   /**
    * The name field, so a refused save can put the cursor back in the thing that
    * has to change for the next one to work.
    */
-  let nameInput: HTMLInputElement | undefined;
+  let nameInput = $state<HTMLInputElement | undefined>(undefined);
 
   /**
    * Longest macro name the backend will store, mirrored here so the field stops
@@ -374,9 +446,9 @@
    */
   const MAX_MACRO_NAME_LEN = 200;
 
-  // The macro's name and id live in `$lib/stores/flow` rather than here, because
-  // the macro list can now open a macro straight into the workspace and its
-  // identity has to arrive with its graph. See `openMacroInWorkspace`.
+  // The macro's name and id live in `$lib/stores/flow.svelte` rather than here,
+  // because the macro list can now open a macro straight into the workspace and
+  // its identity has to arrive with its graph. See `openMacroInWorkspace`.
 
   // Clear a stale rejection as soon as the user starts fixing the name it was
   // about, so the message on screen always refers to what is in the field.
@@ -397,7 +469,7 @@
    * it can be compared with the last thing that was.
    */
   function currentSnapshot(): string {
-    const { nodes, edges } = toObject();
+    const { nodes, edges } = currentGraph();
     return serializeMacro($macroName, nodes, edges);
   }
 
@@ -405,11 +477,14 @@
    * Records the graph on screen as the one on disk.
    *
    * Deferred by a frame on purpose. Node components backfill their newer fields
-   * into the `data` object the store holds as they mount, so a graph just read
+   * into the `data` object the graph holds as they mount, so a graph just read
    * off disk keeps changing for a moment after it is put on the canvas; a
    * baseline taken before that settles would have every freshly opened macro
    * claiming unsaved changes it does not have. `tick()` waits for Svelte Flow to
-   * mount the nodes and the frame waits for their first render.
+   * mount the nodes and the frame waits for their first render - and, now that
+   * those backfills are tracked writes rather than silent ones, for the effects
+   * they schedule, which are flushed in microtasks and so are all done by the
+   * time a `requestAnimationFrame` callback runs.
    */
   async function captureSavedSnapshot() {
     await tick();
@@ -449,13 +524,15 @@
     try {
       saveState = { status: 'saving' };
 
-      const currentFlowData = toObject();
+      const currentFlowData = currentGraph();
 
-      // Serialised here rather than after the call, and that ordering is the
-      // whole point: `toObject()` shares each node's `data` object with the
-      // canvas, so a node edited while the save was in flight would otherwise
-      // be folded into the baseline and never reported unsaved again. Taken
-      // now, this string is exactly the bytes the call below sends.
+      // `currentGraph()` is a `$state.snapshot`, so this is a graph detached
+      // from the canvas: a node edited while the save is in flight cannot reach
+      // it, and the string below is therefore exactly the bytes the call sends.
+      // That used to depend on ordering - `toObject()` shared each node's `data`
+      // object with the canvas, so the snapshot had to be taken before the await
+      // or a mid-flight edit would be folded into the baseline and never
+      // reported unsaved again. The detachment is now structural.
       const sentSnapshot = serializeMacro(name, currentFlowData.nodes, currentFlowData.edges);
 
       // v3's generated models are plain interfaces rather than v2's classes, so
@@ -464,9 +541,6 @@
       // than the Go structs and a cast would compile while sending values Go
       // cannot take: an unused handle is `null` on an edge, and a node's `type`
       // is optional. Both are narrowed here, once, at the boundary.
-      //
-      // `data` and `position` stay by reference, as they were before: this runs
-      // after `sentSnapshot` is taken, which is what makes that ordering matter.
       const savedID = await App.SaveFile(
         {
           nodes: currentFlowData.nodes.map((node) => ({
@@ -539,15 +613,16 @@
 
   // Written out rather than inlined in the markup so the button's tooltip and
   // its accessible name cannot drift apart.
-  $: saveTitle =
+  const saveTitle = $derived(
     saveState.status === 'saving'
       ? "Saving..."
       : $isMacroDirty
         ? "Save macro (Ctrl+S) - unsaved changes"
-        : "Save macro (Ctrl+S)";
+        : "Save macro (Ctrl+S)"
+  );
 
   // Computed property to determine if the status panel should be shown
-  $: hasStatusPanel = isStatusPanelExpanded || statusMessages.length > 0;
+  const hasStatusPanel = $derived(isStatusPanelExpanded || statusMessages.length > 0);
 
   /**
    * Appends a status message. Messages are not expired on a timer: the record
@@ -814,15 +889,16 @@
     // `handleSave` reports it. Listening for an event nothing sends would only
     // suggest failures are handled somewhere they are not.
   }
-  
+
   // Load the last opened file when the component mounts
   async function loadLastOpenedFile() {
     try {
       const data = await App.LoadLastFile();
       if (!data) {
-        // Nothing saved yet. The canvas keeps the defaults from flow.ts, and
-        // they count as hydrated - coming back from the macro list must not
-        // wipe out whatever the user has built on top of them since.
+        // Nothing saved yet. The canvas keeps the defaults from
+        // flow.svelte.ts, and they count as hydrated - coming back from the
+        // macro list must not wipe out whatever the user has built on top of
+        // them since.
         markWorkspaceHydrated();
         return;
       }
@@ -859,24 +935,26 @@
 
   // Unsaved changes
   // ---------------
-  // The canvas is compared with the macro on disk whenever the graph says it
-  // changed, rather than on a timer. Everything that replaces a store's value -
-  // a node dropped or deleted, a node dragged, an edge drawn, the name typed -
-  // fires these subscriptions by itself; an edit made inside a node's `data`
-  // payload fires them through `markGraphEdited`, for the reason in the NOTE at
-  // the top of this file. This used to be a 500ms poll, which meant a save
-  // button that lit up as much as half a second after the keystroke and a
-  // comparison run twice a second whether anything had happened or not.
+  // The canvas is compared with the macro on disk whenever the graph changes,
+  // rather than on a timer. A node dropped or deleted, a node dragged, an edge
+  // drawn, the name typed, a value edited inside a node's `data` payload - every
+  // one of those is now an ordinary tracked write to `graph` (or to the
+  // `macroName` store), so an effect that reads the graph through
+  // `serializeMacro` re-runs on exactly the set of changes that can alter the
+  // saved file and on nothing else. This used to be a 500ms poll, which meant a
+  // save button that lit up as much as half a second after the keystroke and a
+  // comparison run twice a second whether anything had happened or not; before
+  // that it was three store subscriptions plus a `markGraphEdited` call at the
+  // end of every node component.
   //
-  // No debounce sits in front of it. A comparison is a `toObject()` plus a
+  // No debounce sits in front of it. A comparison is a `$state.snapshot` plus a
   // `JSON.stringify` of the graph: measured at roughly 15us for ten nodes,
   // 130us for a hundred and 0.8ms for five hundred - a fraction of the render
   // the edit had already caused, and dwarfed by what Svelte Flow itself does on
-  // each of these notifications (it rebuilds its internal node for every node
-  // in the graph). The thing worth protecting is that the warning is right at
-  // the moment the user reaches for the macro list, and a delay is exactly what
+  // each of these changes (it rebuilds its internal node for every node in the
+  // graph). The thing worth protecting is that the warning is right at the
+  // moment the user reaches for the macro list, and a delay is exactly what
   // would take that away.
-  let dirtyUnsubscribers: (() => void)[] = [];
 
   /**
    * Updates the unsaved-changes flag.
@@ -885,11 +963,26 @@
    * still the one that was loaded, and the baseline arrives a frame later - see
    * `captureSavedSnapshot`. Announcing unsaved changes in that gap would put
    * the warning on screen before the user had touched anything.
+   *
+   * The graph is read before the baseline is looked at, and unconditionally.
+   * Written the other way round, `saved !== null && ...` would short-circuit
+   * past the only reactive read in here on precisely the runs where there is no
+   * baseline yet, and the effect below would be left tracking nothing at all -
+   * so a freshly opened macro would never report an edit again.
    */
   function refreshDirtyState() {
+    const current = currentSnapshot();
     const saved = getSavedSnapshot();
-    isMacroDirty.set(saved !== null && currentSnapshot() !== saved);
+    isMacroDirty.set(saved !== null && current !== saved);
   }
+
+  // Runs once on mount as well as on every later change, which is what makes
+  // the arrival back from the macro list report the graph it arrives with; a
+  // macro whose baseline is still a frame away reports clean either way - see
+  // `refreshDirtyState`. Nothing needs to re-run it when the *baseline* moves:
+  // `markMacroSaved` sets the flag itself, and it is the only thing that
+  // changes a baseline.
+  $effect(refreshDirtyState);
 
   // Initialize event listeners when the component mounts.
   //
@@ -914,26 +1007,11 @@
       // it belongs to edits the user has not saved yet.
       captureSavedSnapshot();
     }
-
-    // Subscribed here rather than with `$:` so the answer is recomputed for
-    // every announced edit, including the ones that change nothing this
-    // component renders. Each subscription also fires once on the spot, which
-    // is what makes the arrival back from the macro list report the graph it
-    // arrives with; a macro whose baseline is still a frame away reports clean
-    // either way - see `refreshDirtyState`.
-    dirtyUnsubscribers = [
-      nodesData.subscribe(refreshDirtyState),
-      edgesData.subscribe(refreshDirtyState),
-      macroName.subscribe(refreshDirtyState),
-    ];
   });
 
   onDestroy(() => {
     for (const unsubscribe of eventUnsubscribers) unsubscribe();
     eventUnsubscribers = [];
-
-    for (const unsubscribe of dirtyUnsubscribers) unsubscribe();
-    dirtyUnsubscribers = [];
 
     clearTimeout(saveSuccessTimer);
     // The glows go with the component, but the timers holding them would
@@ -941,13 +1019,13 @@
     clearActiveNodes();
 
     // One last look, so the flag the macro list reads describes the canvas as
-    // the user left it. The subscriptions above have just been dropped, and an
-    // edit can still land after that - a node component's own teardown, or a
-    // final mutation that never got to announce itself - so this is the answer
-    // that has to be right rather than the last one that happened to arrive.
-    // Guarded because this runs while the route is being torn down: an unsaved
-    // edit going unrecorded is worth a warning in the console, never a throw
-    // out of a destroy.
+    // the user left it. The effect above has already been torn down by this
+    // point, and an edit can still land after that - a node component's own
+    // teardown, or a final mutation that arrives while the route unwinds - so
+    // this is the answer that has to be right rather than the last one that
+    // happened to arrive. Guarded because this runs while the route is being
+    // torn down: an unsaved edit going unrecorded is worth a warning in the
+    // console, never a throw out of a destroy.
     try {
       refreshDirtyState();
     } catch (error) {
@@ -977,7 +1055,7 @@
 
 <!-- Ctrl+S from anywhere in the workspace, including from inside a node's own
      inputs - see `handleKeydown`. -->
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flow-container flex">
   <!-- Left Panel. Kept mounted so it can slide both ways; an `{#if}` here would
@@ -998,21 +1076,37 @@
     class:pr-80={isStatusPanelExpanded}
     class:pr-0={!isStatusPanelExpanded}
   >
+    <!-- `bind:` on both graphs, not plain props. Svelte Flow owns a node's
+         position, its selection and its removal, and it publishes all three by
+         writing the array back - without the binding a drag would snap back and
+         a delete would never reach the file.
+
+         The custom connection line is a component prop rather than the
+         `slot="connectionLine"` it was in 0.1.x: 1.x replaced slots with
+         snippets throughout, and this particular one is not a snippet either -
+         `connectionLineComponent` takes the component itself and Svelte Flow
+         instantiates it inside its own `<svg>`, passing no props. The line
+         reads the connection in progress from `useConnection()` instead.
+
+         The drop handlers are plain DOM attributes now. 1.x forwards everything
+         it does not recognise onto its container `<div>`, so `ondragover` /
+         `ondrop` land on the element the user is actually dragging over; the
+         `on:` directives they replace only ever addressed component events,
+         which Svelte 5 does not have. -->
     <SvelteFlow
-      nodes={nodesData}
+      bind:nodes={graph.nodes}
       {nodeTypes}
-      edges={edgesData}
+      bind:edges={graph.edges}
       {edgeTypes}
       {colorMode}
       connectionMode={ConnectionMode.Loose}
-      defaultEdgeOptions={defaultEdgeOptions}
-      on:dragover={onDragOver}
-      on:drop={onDrop}
+      {defaultEdgeOptions}
+      connectionLineComponent={ConnectionLine}
+      ondragover={onDragOver}
+      ondrop={onDrop}
       deleteKey="Backspace"
       fitView
     >
-      <!-- Custom connection line -->
-      <ConnectionLine slot="connectionLine" />
       <!-- Control Panel -->
       <Panel position="top-right">
         <div class="flex flex-col items-end">
@@ -1026,7 +1120,7 @@
               type="text"
               bind:this={nameInput}
               bind:value={$macroName}
-              on:input={clearSaveError}
+              oninput={clearSaveError}
               placeholder="Macro name"
               aria-label="Macro name"
               maxlength={MAX_MACRO_NAME_LEN}
@@ -1035,11 +1129,10 @@
             <!-- Run Flow Button -->
             <button
               class="flow-button"
-              on:click={handleRunFlow}
+              onclick={handleRunFlow}
               disabled={isExecuting}
             >
-              <svelte:component
-                this={runButtonStatus.icon}
+              <RunIcon
                 class="flow-icon {runButtonStatus.color}"
                 style={isExecuting ? "animation: spin 1s linear infinite" : ""}
               />
@@ -1052,18 +1145,12 @@
             <button
               class="flow-button flow-save-button"
               class:flow-save-button-dirty={$isMacroDirty}
-              on:click={handleSave}
+              onclick={handleSave}
               disabled={saveState.status === 'saving'}
               title={saveTitle}
               aria-label={saveTitle}
             >
-              <svelte:component
-                this={
-                  saveState.status === 'saving' ? Loader :
-                  saveState.status === 'error' ? X :
-                  saveState.status === 'success' ? Check :
-                  Save
-                }
+              <SaveIcon
                 class="flow-icon"
                 style={saveState.status === 'saving' ? "animation: spin 1s linear infinite" : ""}
               />
@@ -1071,12 +1158,12 @@
                 <span class="flow-save-dot" aria-hidden="true"></span>
               {/if}
             </button>
-            <!-- Layout Button. `onLayout` rearranges the workspace stores
+            <!-- Layout Button. `onLayout` rearranges the workspace graph
                  directly, left-to-right - the direction the nodes' own handles
                  point. -->
             <button
               class="flow-button"
-              on:click={() => onLayout("LR")}
+              onclick={() => onLayout("LR")}
             >
               <LayoutDashboard class="flow-icon" />
               <span>Layout</span>

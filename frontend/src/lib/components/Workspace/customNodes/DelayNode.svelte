@@ -4,7 +4,7 @@
     import NodeWrapper from './nodeComponents/NodeWrapper.svelte';
     import type { ComponentType } from 'svelte';
     import { Handle, Position } from "@xyflow/svelte";
-    import { markGraphEdited, type HandleConfig, type DelayNodeData } from '$lib/stores/flow';
+    import type { HandleConfig, DelayNodeData } from '$lib/stores/flow.svelte';
     import TimeInput from './nodeComponents/TimeInput.svelte';
     import ButtonGroup from "./nodeComponents/ButtonGroup.svelte";
     import ButtonGroupItem from "./nodeComponents/ButtonGroupItem.svelte";
@@ -23,8 +23,13 @@
     };
 
     // Svelte Flow passes the node's data payload here, not the whole node - and it
-    // is the *same object* the flow store holds, so every edit below lands in the
-    // store by reference and is picked up by `toObject()` on save.
+    // is the *same object* the graph holds, so every edit below lands in the graph
+    // by reference and is what gets saved.
+    //
+    // That reference is the whole of the contract now. The graph's nodes are deep
+    // `$state` (see `$lib/stores/flow.svelte`), so `data.time = 2500` is an
+    // ordinary tracked write and the edit *is* its own notification - nothing has
+    // to be announced afterwards.
     export let data: DelayNodeData = { ...DEFAULT_DATA };
 
     // Persisted nodes can predate newer fields, so backfill whatever is missing
@@ -42,27 +47,6 @@
 
     function updateDelayType(newType: string) {
         data.delayType = newType as 'Fixed' | 'Random';
-    }
-
-    /**
-     * The other half of the by-reference contract: mutating `data` puts the edit
-     * in the store, this announces it. Every binding and handler in this file
-     * assigns to a property of `data`, which invalidates `data` here and re-runs
-     * this - see `markGraphEdited`.
-     *
-     * Declared last, as it is in every node component: a reactive statement that
-     * writes `data` through a function call is invisible to the compiler, so
-     * source order is all that keeps its write on the announcing side of this
-     * one (see the longer note in `KeyPressNode.svelte`). Anything that comes to
-     * write `data` reactively belongs above this.
-     *
-     * The backfill above is a plain call that assigns nothing, so it does not
-     * fire this. The once-on-init run does, and is harmless: the unsaved-changes
-     * baseline is taken a frame after the nodes mount.
-     */
-    $: {
-        data;
-        markGraphEdited();
     }
 
     // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,

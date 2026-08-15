@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen } from '@testing-library/svelte';
 import { persistedData, renderNode } from '$lib/test/nodeHarness';
 import DelayNode from './DelayNode.svelte';
-import type { DelayNodeData } from '$lib/stores/flow';
+import type { DelayNodeData } from '$lib/stores/flow.svelte';
 
 describe('DelayNode', () => {
 	it('backfills newer fields into a payload saved before they existed', () => {

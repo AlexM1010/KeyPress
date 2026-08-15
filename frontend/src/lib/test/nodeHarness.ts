@@ -1,8 +1,8 @@
 // frontend/src/lib/test/nodeHarness.ts
 import { render } from '@testing-library/svelte';
-import type { ComponentType, SvelteComponent } from 'svelte';
+import type { Component, ComponentType, SvelteComponent } from 'svelte';
 import NodeHarness from './NodeHarness.svelte';
-import { serializeMacro } from '$lib/stores/flow';
+import { serializeMacro } from '$lib/stores/flow.svelte';
 
 /**
  * A custom node component, however the Svelte tooling of the day types one.
@@ -15,10 +15,19 @@ import { serializeMacro } from '$lib/stores/flow';
  * the props here would only move the problem to the call site, and this helper's
  * whole job is to take *any* node.
  *
- * `nodeTypes.ts` reaches for the same escape hatch, for the same reason.
+ * `nodeTypes.ts` used to need the same escape hatch and no longer does: Svelte
+ * Flow 1.x types its node map as `Component<NodeProps & ...>` rather than as a
+ * Svelte 4 component class, so the components go in there directly. That fixed
+ * the map, not this - a helper that takes an arbitrary node still has nothing
+ * more specific to say about its props than `any`.
  */
+// The union covers both compilation modes, which this suite genuinely spans:
+// the six node components are still legacy (a class), while `NodeWrapper` had to
+// become runes (a function) and is rendered directly by its own test. Whichever
+// one a caller hands over, it ends up at the same `<svelte:component>` in
+// `NodeHarness.svelte`, so the two declarations have to agree.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>>;
+type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>> | Component<any, any, any>;
 
 // Unmounting between tests is handled once for the whole suite, in `setup.ts`.
 
@@ -27,11 +36,16 @@ type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>>;
  * `data` object it was given.
  *
  * `data` is returned rather than copied because it is the whole point of the
- * exercise: every node component mutates the payload it is handed in place, and
- * that by-reference write is how an edit reaches the flow store at all (see
- * `markGraphEdited`). A test therefore drives a control and then reads *this*
- * object - if the component had reassigned `data` instead of mutating it, the
- * store's copy would go stale in exactly the way this returns unchanged.
+ * exercise: every node component edits the payload it is handed in place, and
+ * that by-reference write is how an edit reaches the graph at all. A test
+ * therefore drives a control and then reads *this* object - if the component
+ * had reassigned `data` instead of editing it, the graph's copy would go stale
+ * in exactly the way this one returns unchanged.
+ *
+ * What the payload is *in* changed with Svelte Flow 1.x and this did not. The
+ * graph now holds nodes in deep `$state`, so an in-place write is tracked and
+ * needs no announcing; here the payload is a plain object passed straight to
+ * the component, which is all this assertion has ever needed.
  */
 export function renderNode<TData extends Record<string, unknown>>(
 	component: AnyNodeComponent,

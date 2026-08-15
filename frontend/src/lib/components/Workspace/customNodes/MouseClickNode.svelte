@@ -9,7 +9,7 @@
     import ButtonGroupItem from "./nodeComponents/ButtonGroupItem.svelte";
     import TimeInput from "./nodeComponents/TimeInput.svelte";
     import NumberInput from './nodeComponents/NumberInput.svelte';
-    import { markGraphEdited, type HandleConfig, type MouseClickNodeData } from '$lib/stores/flow';
+    import type { HandleConfig, MouseClickNodeData } from '$lib/stores/flow.svelte';
 
     type ButtonType = 'left' | 'middle' | 'right';
     type ScrollDirection = 'Vertical' | 'Horizontal';
@@ -34,8 +34,15 @@
     };
 
     // Svelte Flow passes the node's data payload here, not the whole node - and it
-    // is the *same object* the flow store holds, so every edit below lands in the
-    // store by reference and is picked up by `toObject()` on save.
+    // is the *same object* the graph holds, so every edit below lands in the graph
+    // by reference and is what gets saved.
+    //
+    // That reference is the whole of the contract now. The graph's nodes are deep
+    // `$state` (see `$lib/stores/flow.svelte`), so writing a property of `data` in
+    // place is an ordinary tracked write and the edit *is* its own notification.
+    // `toggleDirection`'s `push` included, and that is the one worth naming: it
+    // changes no reference, so under the old store it slipped through unannounced
+    // and only the `?? []` assignment on the line above it saved the edit.
     export let data: MouseClickNodeData = { ...DEFAULT_DATA };
 
     // Persisted nodes can predate newer fields, so backfill whatever is missing
@@ -72,29 +79,6 @@
 
     function handleClick(type: ButtonType): void {
         updateButtonType(type);
-    }
-
-    /**
-     * The other half of the by-reference contract: mutating `data` puts the edit
-     * in the store, this announces it. Every binding and handler in this file
-     * assigns to a property of `data`, which invalidates `data` here and re-runs
-     * this - see `markGraphEdited`. `toggleDirection` included: its `push` would
-     * announce nothing on its own, and the `?? []` assignment on its first line
-     * is what invalidates `data` for both of its branches.
-     *
-     * Declared last, as it is in every node component: a reactive statement that
-     * writes `data` through a function call is invisible to the compiler, so
-     * source order is all that keeps its write on the announcing side of this
-     * one (see the longer note in `KeyPressNode.svelte`). Anything that comes to
-     * write `data` reactively belongs above this.
-     *
-     * The backfill above is a plain call that assigns nothing, so it does not
-     * fire this. The once-on-init run does, and is harmless: the unsaved-changes
-     * baseline is taken a frame after the nodes mount.
-     */
-    $: {
-        data;
-        markGraphEdited();
     }
 
     // Svelte Flow's NodeWrapper passes a fixed prop set (selected, isConnectable,

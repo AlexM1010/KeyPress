@@ -14,7 +14,7 @@
     getBezierPath,
     BaseEdge,
     type EdgeProps,
-    EdgeLabelRenderer,
+    EdgeLabel,
     useEdges,
   } from "@xyflow/svelte";
   import { X } from "lucide-svelte";
@@ -27,8 +27,9 @@
    *
    * `defaultEdgeOptions` in Flow.svelte stamps `{ color: 'var(--main-text)' }`
    * onto every edge, so this is how an edge says what colour it should be
-   * drawn in. Read-only here: the payload is the very object held in the edges
-   * store, so it must never be reassigned.
+   * drawn in. Read-only here: the payload is the very object held in
+   * `graph.edges`, so a write would be a write to the user's graph - and now
+   * that the graph is deep `$state`, one that silently marks the macro dirty.
    */
   interface CustomEdgeData {
     color?: string;
@@ -350,12 +351,31 @@
   <BaseEdge path={edgePath} style={edgeStyle} {interactionWidth} /> <!-- {markerEnd} -->
 </g>
 
-<!-- Hover points with delete buttons -->
+<!--
+  Hover points with delete buttons.
+
+  `EdgeLabel` is Svelte Flow 1.x's replacement for `EdgeLabelRenderer`, and it
+  is not a like-for-like swap. The old component was a bare portal: it hoisted
+  whatever you put in it out of the SVG and into an HTML layer, and positioning
+  was entirely yours - hence the `transform: translate(x, y)` and the pair of
+  `-12px` margins that used to hand-centre a 24px box on the point. `EdgeLabel`
+  takes `x` / `y` itself and centres on them with its own
+  `translate(-50%, -50%)`, so both of those go away and the button is centred
+  properly at any size rather than at one hard-coded one.
+
+  `transparent` is required, not decorative: `.svelte-flow__edge-label` paints
+  an opaque background by default (white on the light theme, near-black on the
+  dark one), which without this draws a card behind the delete button and over
+  the edge it sits on.
+
+  The inner `<div>` survives because a Svelte transition can only be applied to
+  an element, never to a component - `transition:fade` on `<EdgeLabel>` would
+  not compile.
+-->
 {#each hoverPoints as point (point.id)}
-  <EdgeLabelRenderer>
+  <EdgeLabel x={point.x} y={point.y} transparent class="nodrag nopan">
     <div
-      class="hover-point nodrag nopan"
-      style="transform: translate({point.x}px, {point.y}px);"
+      class="hover-point"
       transition:fade={{ duration: CONFIG.FADE_DURATION, easing: cubicOut }}
     >
       <button
@@ -368,7 +388,7 @@
         <X />
       </button>
     </div>
-  </EdgeLabelRenderer>
+  </EdgeLabel>
 {/each}
 
 <style>
@@ -377,13 +397,13 @@
     color: #000;
   }
 
+  /* Placement is `EdgeLabel`'s job now - see the comment on it above. All this
+     is left to do is give the button a small hover buffer around it, so the
+     pointer does not have to land on 16px of circle to keep it alive. */
   .hover-point {
-    position: absolute;
-    pointer-events: all;
-    padding: 0.25rem; /* ensures button is centred */
+    display: flex;
+    padding: 0.25rem;
     transform-origin: center;
-    margin-left: -12px; /* ensures button is centred */
-    margin-top: -12px; /* ensures button is centred */
   }
 
   .delete-button {

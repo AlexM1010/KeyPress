@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { get } from 'svelte/store';
 import { Keyboard } from 'lucide-svelte';
 // Rendered through `NodeHarness` rather than through `renderNode`, because this
 // wrapper deliberately takes no `data` prop - the payload belongs to the node
 // component inside it.
 import NodeHarness from '$lib/test/NodeHarness.svelte';
-import { nodesData, type FlowNode } from '$lib/stores/flow';
+import { graph, type FlowNode } from '$lib/stores/flow.svelte';
 import NodeWrapper from './NodeWrapper.svelte';
 
 
@@ -58,9 +57,9 @@ async function hoverHeader(): Promise<void> {
 
 describe('NodeWrapper', () => {
 	beforeEach(() => {
-		// The store is module state shared by every test in this file, and the
+		// The graph is module state shared by every test in this file, and the
 		// duplicate under test appends to it, so it is reseeded rather than added to.
-		nodesData.set([seedNode()]);
+		graph.nodes = [seedNode()];
 	});
 
 	it('keeps the context menu out of the way until the header is hovered', async () => {
@@ -80,9 +79,9 @@ describe('NodeWrapper', () => {
 		await hoverHeader();
 		await fireEvent.click(screen.getByLabelText('Duplicate'));
 
-		const [original, copy] = get(nodesData);
+		const [original, copy] = graph.nodes;
 
-		expect(get(nodesData)).toHaveLength(2);
+		expect(graph.nodes).toHaveLength(2);
 		// A fresh uuid, the same id scheme a node dropped from the palette gets:
 		// once it is on the canvas a duplicate has to be indistinguishable from any
 		// other node, and a reused id would have Svelte Flow key two nodes the same.
@@ -101,17 +100,22 @@ describe('NodeWrapper', () => {
 		await hoverHeader();
 		await fireEvent.click(screen.getByLabelText('Duplicate'));
 
-		const [original, copy] = get(nodesData);
+		const [original, copy] = graph.nodes;
 
 		expect(copy.data).toEqual(original.data);
 		expect(copy.data).not.toBe(original.data);
 
-		// The reason `structuredClone` is there rather than a spread. Every node
-		// component mutates the payload it is handed in place - that by-reference
-		// write is how an edit reaches the store at all - so a shallow copy would
+		// The reason the payload is snapshotted rather than spread. Every node
+		// component edits the payload it is handed in place - that by-reference
+		// write is how an edit reaches the graph at all - so a shallow copy would
 		// leave the duplicate editing the original's nested arrays: ticking Alt on
 		// the copy would tick it on the node it was copied from, and the user would
 		// have no way to tell why.
+		//
+		// It is `$state.snapshot` rather than `structuredClone` since Svelte Flow
+		// 1.x: a payload in the graph is a `$state` proxy now, and structuredClone
+		// throws `DataCloneError` on a proxy. What this asserts is the depth of the
+		// copy, which is the part that has to hold whichever call makes it.
 		(copy.data.modifiers as string[]).push('Alt');
 
 		expect(original.data.modifiers).toEqual(['Ctrl']);

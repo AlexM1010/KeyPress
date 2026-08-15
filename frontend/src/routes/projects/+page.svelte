@@ -23,7 +23,7 @@
 
 	import { App } from '$lib/bindings/Keypress/backend';
 	import type { ProjectSummary } from '$lib/bindings/Keypress/backend';
-	import { openMacroInWorkspace, isMacroDirty, macroName } from '$lib/stores/flow';
+	import { openMacroInWorkspace, isMacroDirty, macroName } from '$lib/stores/flow.svelte';
 	import { describeError, isBackendUnreachable } from '$lib/utils/helpers';
 
 	import TabTitle from '$lib/components/Projects/TabTitle.svelte';

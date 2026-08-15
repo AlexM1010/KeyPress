@@ -9,7 +9,6 @@
     import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
     import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
-    import { markGraphEdited } from '$lib/stores/flow';
     import type { HandleConfig } from './types';
 
     /**
@@ -172,10 +171,16 @@
     };
 
     // Svelte Flow passes the node's data payload here, not the whole node - and it
-    // is the *same object* the flow store holds, so every edit below lands in the
-    // store by reference and is picked up by `toObject()` on save. The controls
-    // therefore bind straight to `data`; binding them to local props would drop
-    // the user's choices on save.
+    // is the *same object* the graph holds, so every edit below lands in the graph
+    // by reference and is what gets saved. The controls therefore bind straight to
+    // `data`; binding them to local props would drop the user's choices on save.
+    //
+    // That reference is the whole of the contract now. The graph's nodes are deep
+    // `$state` (see `$lib/stores/flow.svelte`), so `data.modifiers = [...]` - or a
+    // write to any other property, from a binding or from `syncModifiers` - is an
+    // ordinary tracked write, and the edit *is* its own notification. Nothing has
+    // to be announced afterwards, and no statement in this file has to come last
+    // for an edit to be seen.
     export let data: KeyPressNodeData = { ...DEFAULT_DATA };
 
     // Backfill whatever a persisted node is missing without clobbering saved
@@ -216,7 +221,7 @@
      *
      * The equality check is what keeps this from writing on every reactive pass;
      * the write itself only ever touches a property of `data`, never `data`
-     * itself, so the by-reference link to the flow store survives.
+     * itself, so the by-reference link to the graph survives.
      */
     function syncModifiers(checked: Record<ModifierName, boolean>): void {
         const next = MODIFIER_OPTIONS.filter((name) => checked[name]);
@@ -249,31 +254,6 @@
      */
     function selectCharacter(event: Event): void {
         (event.currentTarget as HTMLInputElement).select();
-    }
-
-    /**
-     * The other half of the by-reference contract: mutating `data` puts the edit
-     * in the store, this announces it. Every binding and handler in this file
-     * assigns to a property of `data`, which invalidates `data` here and re-runs
-     * this - see `markGraphEdited`.
-     *
-     * Declared last, and that is not tidiness. `syncModifiers` writes
-     * `data.modifiers` from inside a reactive statement, and the compiler cannot
-     * see that through the function call, so it puts no ordering constraint on
-     * the two. Svelte then runs them in source order and re-reads the dirty
-     * flags between statements: after `syncModifiers`, a modifier ticked on the
-     * keyboard tab is announced in the same pass. Before it, the write lands
-     * after this has already run and the edit goes out unannounced - the macro
-     * would look saved with a modifier the file does not have. Anything else
-     * that comes to write `data` reactively belongs above this too.
-     *
-     * The backfill at the top of the file is a plain call that assigns nothing,
-     * so it does not fire this. The once-on-init run does, and is harmless: the
-     * unsaved-changes baseline is taken a frame after the nodes mount.
-     */
-    $: {
-        data;
-        markGraphEdited();
     }
 
     $$restProps;

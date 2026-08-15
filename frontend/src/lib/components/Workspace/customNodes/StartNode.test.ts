@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen } from '@testing-library/svelte';
 import { persistedData, renderNode } from '$lib/test/nodeHarness';
 import StartNode from './StartNode.svelte';
-import type { StartNodeData } from '$lib/stores/flow';
+import type { StartNodeData } from '$lib/stores/flow.svelte';
 
 /**
  * Records a hotkey the way a user does: arm the node, then let the keys arrive
