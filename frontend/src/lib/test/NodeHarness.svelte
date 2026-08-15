@@ -37,7 +37,6 @@
      * used within a Custom Node component", because a `setContext` under a
      * different key is indistinguishable from no context at all.
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>> | Component<any, any, any>;
 
     export let component: AnyNodeComponent;

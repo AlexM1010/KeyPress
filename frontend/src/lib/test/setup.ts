@@ -24,7 +24,7 @@ if (typeof window !== 'undefined') {
 	// in the files that happen to need it today because which components are
 	// theme-aware is not something the next test author should have to know.
 	if (typeof window.matchMedia !== 'function') {
-		window.matchMedia = ((query: string) => ({
+		window.matchMedia = (query: string) => ({
 			matches: false,
 			media: query,
 			onchange: null,
@@ -33,7 +33,7 @@ if (typeof window !== 'undefined') {
 			addListener: () => {},
 			removeListener: () => {},
 			dispatchEvent: () => false
-		})) as unknown as typeof window.matchMedia;
+		});
 	}
 
 	// ResizeObserver is what Svelte Flow watches the canvas with. No test here
@@ -45,7 +45,7 @@ if (typeof window !== 'undefined') {
 			observe() {}
 			unobserve() {}
 			disconnect() {}
-		} as unknown as typeof ResizeObserver;
+		};
 	}
 
 	// Unmount whatever the test rendered. `@testing-library/svelte` registers

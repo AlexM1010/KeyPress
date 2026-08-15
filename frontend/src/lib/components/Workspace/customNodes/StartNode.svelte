@@ -78,6 +78,13 @@
     let isRecording: boolean = false;
     let osDetectionFailed: boolean = false;
     let currentOS: OperatingSystem;
+    // A SvelteSet would be the runes answer, and this component is still
+    // legacy. The template does read this, but `toggleSpecialKey` reassigns it
+    // (`= new Set(selectedSpecialKeys)`) before mutating, which is what makes
+    // the read update under Svelte 4 semantics. Worth revisiting as a SvelteSet
+    // when this component moves to runes, and not before - the reassignment and
+    // the reactive class are two answers to the same question.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
     let selectedSpecialKeys = new Set<string>();
 
     /**

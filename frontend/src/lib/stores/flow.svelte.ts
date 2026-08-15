@@ -187,6 +187,9 @@ const DUPLICATE_OFFSET = 40;
  * handle ids and execution order, is a bigger assumption than this is worth.
  */
 export function duplicateNodes(ids: string[]): FlowNode[] {
+	// A lookup local to this call, gone by the time it returns - nothing reads it
+	// reactively, so the plain Set is right and SvelteSet would only add a proxy.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const wanted = new Set(ids);
 	const copies = graph.nodes
 		.filter((node) => wanted.has(node.id))
@@ -197,7 +200,7 @@ export function duplicateNodes(ids: string[]): FlowNode[] {
 				x: node.position.x + DUPLICATE_OFFSET,
 				y: node.position.y + DUPLICATE_OFFSET
 			},
-			data: $state.snapshot(node.data) as NodeDataPayload,
+			data: $state.snapshot(node.data),
 			selected: true
 		})) as FlowNode[];
 

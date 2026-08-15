@@ -75,7 +75,18 @@ export default defineConfig(
 			'@typescript-eslint/no-explicit-any': 'off',
 			'@typescript-eslint/no-unsafe-assignment': 'off',
 			'@typescript-eslint/no-unsafe-member-access': 'off',
-			'@typescript-eslint/no-unsafe-argument': 'off'
+			'@typescript-eslint/no-unsafe-argument': 'off',
+
+			// Off in tests because it is wrong here, not merely noisy. Testing
+			// Library types `getByLabelText` as returning `HTMLElement`, and the
+			// tests narrow that to `HTMLInputElement` / `HTMLSelectElement` to reach
+			// `.value`, `.maxLength` and `.options`. This rule calls those casts
+			// unnecessary and `--fix` strips them, which breaks the build: five
+			// "Property 'value' does not exist on type 'HTMLElement'" errors from
+			// svelte-check on the very next run. ESLint's projectService and
+			// svelte-check resolve that generic differently, and svelte-check is the
+			// one that gates CI, so it wins.
+			'@typescript-eslint/no-unnecessary-type-assertion': 'off'
 		}
 	}
 );

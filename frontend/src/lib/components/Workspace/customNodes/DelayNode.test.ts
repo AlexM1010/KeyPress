@@ -20,7 +20,7 @@ describe('DelayNode', () => {
 			time: 250,
 			minTime: 10,
 			maxTime: 20
-		} as DelayNodeData);
+		});
 
 		expect(persistedData(data)).toEqual({
 			delayType: 'Random',
@@ -71,7 +71,7 @@ describe('DelayNode', () => {
 			time: 1000,
 			minTime: 500,
 			maxTime: 1500
-		} as DelayNodeData);
+		});
 
 		await fireEvent.input(screen.getByLabelText('Minimum Time'), { target: { value: '200' } });
 		await fireEvent.input(screen.getByLabelText('Maximum Time'), { target: { value: '800' } });

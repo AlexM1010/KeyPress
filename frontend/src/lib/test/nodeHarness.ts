@@ -26,7 +26,6 @@ import { serializeMacro } from '$lib/stores/flow.svelte';
 // become runes (a function) and is rendered directly by its own test. Whichever
 // one a caller hands over, it ends up at the same `<svelte:component>` in
 // `NodeHarness.svelte`, so the two declarations have to agree.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyNodeComponent = ComponentType<SvelteComponent<any, any, any>> | Component<any, any, any>;
 
 // Unmounting between tests is handled once for the whole suite, in `setup.ts`.

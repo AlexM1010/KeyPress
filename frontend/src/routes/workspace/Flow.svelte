@@ -699,11 +699,20 @@
    */
   const MIN_ACTIVE_GLOW_MS = 220;
 
+  // Plain Maps, not SvelteMaps, and eslint-plugin-svelte cannot tell the
+  // difference: nothing renders from either of these. They are bookkeeping for
+  // the glow timers, read only inside the functions below, and the thing the
+  // canvas actually draws from is the node's own state. A reactive Map here
+  // would proxy every get and set to notify nobody.
+  /* eslint-disable svelte/prefer-svelte-reactivity */
+
   /** When each currently-lit node was reported as started. */
   const activeSince = new Map<string, number>();
 
   /** Glows waiting out `MIN_ACTIVE_GLOW_MS` before they go out. */
   const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /* eslint-enable svelte/prefer-svelte-reactivity */
 
   /** Lights a node up on the canvas for as long as the backend is running it. */
   function markNodeActive(nodeId: string) {
