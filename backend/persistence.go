@@ -291,7 +291,11 @@ func writeMacroFile(fullPath string, data []byte, replacing bool) error {
 			return err
 		}
 		if err := reservation.Close(); err != nil {
-			removeIgnoringMissing(fullPath)
+			// The cleanup and flush helpers live in utils because writeConfig
+			// there needs exactly the same two, character for character. The
+			// "persistence" argument is what keeps their log lines saying which
+			// writer was unwinding - see utils.RemoveIgnoringMissing.
+			utils.RemoveIgnoringMissing("persistence", fullPath)
 			return err
 		}
 	}
@@ -301,7 +305,7 @@ func writeMacroFile(fullPath string, data []byte, replacing bool) error {
 	tmp, err := os.CreateTemp(filepath.Dir(fullPath), tempFilePattern)
 	if err != nil {
 		if !replacing {
-			removeIgnoringMissing(fullPath)
+			utils.RemoveIgnoringMissing("persistence", fullPath)
 		}
 		return err
 	}
@@ -316,51 +320,23 @@ func writeMacroFile(fullPath string, data []byte, replacing bool) error {
 		log.Printf("persistence: could not set the mode on %q: %v", tmpPath, err)
 	}
 
-	if err := writeSyncClose(tmp, data); err != nil {
-		removeIgnoringMissing(tmpPath)
+	if err := utils.WriteSyncClose(tmp, data); err != nil {
+		utils.RemoveIgnoringMissing("persistence", tmpPath)
 		if !replacing {
-			removeIgnoringMissing(fullPath)
+			utils.RemoveIgnoringMissing("persistence", fullPath)
 		}
 		return err
 	}
 
 	if err := os.Rename(tmpPath, fullPath); err != nil {
-		removeIgnoringMissing(tmpPath)
+		utils.RemoveIgnoringMissing("persistence", tmpPath)
 		if !replacing {
-			removeIgnoringMissing(fullPath)
+			utils.RemoveIgnoringMissing("persistence", fullPath)
 		}
 		return err
 	}
 
 	return nil
-}
-
-// writeSyncClose writes data to file, flushes it to disk and closes it,
-// reporting whichever step failed.
-//
-// The Sync is what makes the rename in writeMacroFile worth doing: renaming a
-// file whose contents are still only in the page cache would leave the macro
-// exactly as losable as writing it in place. Close matters too - on some
-// filesystems it is where a failed write finally surfaces.
-func writeSyncClose(file *os.File, data []byte) error {
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	return file.Close()
-}
-
-// removeIgnoringMissing deletes path, logging anything except it already being
-// gone. Every caller is cleaning up after a failure it is about to report, so
-// there is nothing here worth a second error.
-func removeIgnoringMissing(path string) {
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("persistence: failed to clean up %q: %v", path, err)
-	}
 }
 
 // ListProjects enumerates the saved macros in the app data directory.

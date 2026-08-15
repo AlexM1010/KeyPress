@@ -1,0 +1,15 @@
+{
+  "description": "A straight line from Start: every node runs.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "second", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "third", "type": "KeyPressNode", "position": { "x": 0, "y": 200 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "second" },
+      { "id": "e2", "source": "second", "target": "third" }
+    ]
+  },
+  "reachable": ["start", "second", "third"]
+}

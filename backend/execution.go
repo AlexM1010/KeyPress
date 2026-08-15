@@ -157,21 +157,23 @@ func (a *App) startFlow(flowData FlowData) error {
 	// no-op while the pool is already running.
 	a.taskQueue.Start(defaultWorkerCount)
 
-	// Capture this run's context before enqueueing anything: handleCompletions
-	// must watch the generation it belongs to, not whatever generation the
-	// queue happens to be on later.
-	execCtx := a.taskQueue.Context()
+	// Capture this run's generation before enqueueing anything: everything this
+	// run submits is stamped with the generation it belongs to, and
+	// handleCompletions watches that one rather than whatever generation the
+	// queue happens to be on later. Taken together in one call so the token and
+	// the context cannot describe different generations - see TaskQueue.Current.
+	execGen, execCtx := a.taskQueue.Current()
 
 	task := Task{
 		ID:   startNode.ID,
 		Type: startNode.Type,
 		Data: startNode.Data,
 	}
-	a.taskQueue.Enqueue(task)
+	a.taskQueue.Enqueue(execGen, task)
 
 	// Start a goroutine to handle task completions. It starts with one task in
 	// flight: the Start node just enqueued above.
-	go a.handleCompletions(execCtx)
+	go a.handleCompletions(execGen, execCtx)
 
 	return nil
 }
@@ -327,7 +329,10 @@ func (a *App) notifyTaskCompletion(ctx context.Context, taskID string) {
 }
 
 // handleCompletions listens for completed tasks and enqueues dependent tasks.
-// ctx is the task queue context of the run it was started for.
+// gen and ctx are the task queue generation and context of the run it was
+// started for, captured together by startFlow. Every task this goroutine
+// submits carries gen, so work belonging to a run that has since been stopped
+// is refused by the queue rather than executed by whatever run came next.
 //
 // It also detects a deadlocked run. The engine only ever enqueues work in
 // reaction to a completion, so once nothing is in flight - nothing queued,
@@ -346,12 +351,36 @@ func (a *App) notifyTaskCompletion(ctx context.Context, taskID string) {
 // happens here, apart from the Start node that StartExecution enqueues just
 // before starting this goroutine, which is what it counts to begin with - so
 // it needs no lock of its own.
-func (a *App) handleCompletions(ctx context.Context) {
+func (a *App) handleCompletions(gen uint64, ctx context.Context) {
 	inFlight := 1
 
 	for {
 		select {
 		case taskID := <-a.notifyCh:
+			// Both cases of this select can be ready at once and Go picks one
+			// at random, so re-check cancellation before acting on the
+			// completion - the same guard, for the same reason, as the one in
+			// TaskQueue.worker.
+			//
+			// It is load-bearing rather than merely tidy. This branch runs its
+			// whole body without consulting ctx again, and this goroutine is
+			// not tracked by the queue's WaitGroup, so Stop does not wait for
+			// it: a run that was stopped while one of its completions was in
+			// flight would otherwise carry on keeping books for a run that is
+			// over - decrementing inFlight, marking nodes completed, and
+			// reporting execution-completed for a macro the user stopped.
+			//
+			// It is not what keeps a stopped run's work from executing. The
+			// generation token does that, at the queue itself, and covers the
+			// case this cannot: cancellation observed here still leaves a
+			// window before the Enqueue below. See TaskQueue.Enqueue.
+			if ctx.Err() != nil {
+				a.setExecuting(false)
+				log.Printf("Execution stopped; discarding completion of task %s", taskID)
+				a.emitEvent("execution-stopped", nil)
+				return
+			}
+
 			// The completion count is compared against the size of this run's
 			// graph, so only count tasks that belong to it. Nothing outside
 			// the graph is ever enqueued; this just keeps a stray completion
@@ -383,7 +412,7 @@ func (a *App) handleCompletions(ctx context.Context) {
 						Type: node.Type,
 						Data: node.Data,
 					}
-					a.taskQueue.Enqueue(task)
+					a.taskQueue.Enqueue(gen, task)
 					inFlight++
 				}
 			}

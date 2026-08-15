@@ -1,0 +1,17 @@
+{
+  "description": "An edge can outlive the node it points at in a hand-edited file. Neither walk may invent a node from one.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "a", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "orphan", "type": "DelayNode", "position": { "x": 300, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "a" },
+      { "id": "e2", "source": "start", "target": "ghost" },
+      { "id": "e3", "source": "a", "target": "another-ghost" },
+      { "id": "e4", "source": "third-ghost", "target": "orphan" }
+    ]
+  },
+  "reachable": ["start", "a"]
+}

@@ -1,0 +1,18 @@
+{
+  "description": "A loop the run can reach. Both walks must terminate on it, and must reach every node in the loop. (The engine would then report the loop as a stall - reachability is not runnability.)",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "a", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "b", "type": "DelayNode", "position": { "x": 0, "y": 200 }, "data": {} },
+      { "id": "c", "type": "DelayNode", "position": { "x": 0, "y": 300 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "a" },
+      { "id": "e2", "source": "a", "target": "b" },
+      { "id": "e3", "source": "b", "target": "c" },
+      { "id": "e4", "source": "c", "target": "a" }
+    ]
+  },
+  "reachable": ["start", "a", "b", "c"]
+}

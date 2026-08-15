@@ -1,0 +1,17 @@
+{
+  "description": "Two nodes wired to each other but not to Start are left out of the run entirely.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "live", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "island-a", "type": "DelayNode", "position": { "x": 400, "y": 0 }, "data": {} },
+      { "id": "island-b", "type": "DelayNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "lonely", "type": "MouseMoveNode", "position": { "x": 800, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "live" },
+      { "id": "e2", "source": "island-a", "target": "island-b" }
+    ]
+  },
+  "reachable": ["start", "live"]
+}

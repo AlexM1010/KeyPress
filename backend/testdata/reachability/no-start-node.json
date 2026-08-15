@@ -1,0 +1,11 @@
+{
+  "description": "No Start node at all: nothing is reachable. The Go engine refuses the run outright; the frontend still has to name every node, so it treats the whole graph as unreachable.",
+  "flow": {
+    "nodes": [
+      { "id": "a", "type": "DelayNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "b", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} }
+    ],
+    "edges": [{ "id": "e1", "source": "a", "target": "b" }]
+  },
+  "reachable": []
+}

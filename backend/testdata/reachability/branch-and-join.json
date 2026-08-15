@@ -1,0 +1,20 @@
+{
+  "description": "Start splits into two branches that meet again at a join. Both branches and the join run.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "upper", "type": "DelayNode", "position": { "x": 100, "y": -50 }, "data": {} },
+      { "id": "lower", "type": "DelayNode", "position": { "x": 100, "y": 50 }, "data": {} },
+      { "id": "lower-tail", "type": "DelayNode", "position": { "x": 200, "y": 50 }, "data": {} },
+      { "id": "join", "type": "MouseClickNode", "position": { "x": 300, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "upper" },
+      { "id": "e2", "source": "start", "target": "lower" },
+      { "id": "e3", "source": "lower", "target": "lower-tail" },
+      { "id": "e4", "source": "upper", "target": "join" },
+      { "id": "e5", "source": "lower-tail", "target": "join" }
+    ]
+  },
+  "reachable": ["start", "upper", "lower", "lower-tail", "join"]
+}

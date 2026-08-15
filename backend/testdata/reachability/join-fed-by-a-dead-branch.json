@@ -1,0 +1,19 @@
+{
+  "description": "A join whose second input is on a branch the run can never reach. The join is still reachable - the dead edge is pruned rather than treated as a prerequisite - and only the dead branch is left out.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "live", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "join", "type": "MouseClickNode", "position": { "x": 0, "y": 200 }, "data": {} },
+      { "id": "dead", "type": "DelayNode", "position": { "x": 300, "y": 100 }, "data": {} },
+      { "id": "dead-feeder", "type": "DelayNode", "position": { "x": 300, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "live" },
+      { "id": "e2", "source": "live", "target": "join" },
+      { "id": "e3", "source": "dead-feeder", "target": "dead" },
+      { "id": "e4", "source": "dead", "target": "join" }
+    ]
+  },
+  "reachable": ["start", "live", "join"]
+}

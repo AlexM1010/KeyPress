@@ -1,0 +1,18 @@
+{
+  "description": "The Start node is enqueued unconditionally, so edges pointing INTO it change nothing: the run still begins there, the loop back into it does not extend the walk, and a node that only feeds Start stays unreachable.",
+  "flow": {
+    "nodes": [
+      { "id": "tail", "type": "DelayNode", "position": { "x": 0, "y": -100 }, "data": {} },
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "a", "type": "DelayNode", "position": { "x": 0, "y": 100 }, "data": {} },
+      { "id": "b", "type": "DelayNode", "position": { "x": 0, "y": 200 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "a" },
+      { "id": "e2", "source": "a", "target": "b" },
+      { "id": "e3", "source": "b", "target": "start" },
+      { "id": "e4", "source": "tail", "target": "start" }
+    ]
+  },
+  "reachable": ["start", "a", "b"]
+}

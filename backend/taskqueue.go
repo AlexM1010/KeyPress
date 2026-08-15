@@ -47,6 +47,12 @@ type TaskQueue struct {
 	cancel  context.CancelFunc
 	started bool
 
+	// gen identifies the current generation. Enqueue takes it as a token so a
+	// caller can say which generation it means, rather than only "whichever is
+	// current" - see Enqueue. NewTaskQueue installs the first generation, so a
+	// live token is always >= 1 and the zero value is permanently stale.
+	gen uint64
+
 	// wg tracks the workers of the current generation.
 	wg sync.WaitGroup
 
@@ -67,9 +73,10 @@ func NewTaskQueue(app *App, bufferSize int) *TaskQueue {
 	return q
 }
 
-// newGenerationLocked installs a fresh context and task channel. Callers must
-// hold q.mu.
+// newGenerationLocked installs a fresh context and task channel, and retires
+// every token issued for the previous one. Callers must hold q.mu.
 func (q *TaskQueue) newGenerationLocked() {
+	q.gen++
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.tasks = make(chan Task, q.bufferSize)
 }
@@ -101,9 +108,21 @@ func (q *TaskQueue) Start(workerCount int) {
 // observe the shutdown of one particular run must capture this once, at the
 // start of that run, rather than re-reading it.
 func (q *TaskQueue) Context() context.Context {
+	_, ctx := q.Current()
+	return ctx
+}
+
+// Current returns the token and the context of the current generation.
+//
+// Both in one call, and read under a single acquisition of q.mu, because a run
+// captures them together at its start and they must describe the same
+// generation: taking them from two separate calls leaves a window where Stop
+// lands in between and the run watches one generation while enqueueing into
+// another - exactly the confusion the token exists to prevent.
+func (q *TaskQueue) Current() (uint64, context.Context) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.ctx
+	return q.gen, q.ctx
 }
 
 // worker processes tasks from the queue. It is bound to the context and
@@ -134,12 +153,71 @@ func (q *TaskQueue) worker(workerID int, ctx context.Context, tasks <-chan Task)
 	}
 }
 
-// Enqueue adds a task to the queue. It blocks while the queue is full and
-// returns early if the queue has been stopped.
-func (q *TaskQueue) Enqueue(task Task) {
+// Enqueue adds a task to the queue. It blocks while the queue is full, and
+// drops the task if the queue is not running.
+//
+// "Not running" has to be tested with q.started, not with cancellation alone.
+// Stop installs a fresh generation on its way out, so a queue that has been
+// stopped is sitting on a live, uncancelled context and an empty channel with
+// no workers behind it. A cancellation-only guard therefore passes, and the
+// task is buffered into a generation nobody is draining - where it waits for
+// the next Start and is then executed by the *next* run's workers. For this
+// app that is a mouse click or a keystroke the user never asked for. The
+// caller that gets there is App.handleCompletions: it is an untracked
+// goroutine, so wg.Wait does not cover it, and once it has taken a completion
+// off notifyCh it runs the rest of the loop body - enqueues included - without
+// re-checking its context.
+//
+// Not fixed by making Stop leave the generation cancelled and letting Start
+// install the fresh one: Context() is the handle a run watches for shutdown,
+// and a queue that reports a done context while idle would make every
+// between-runs caller of it look like it was cancelled. Nor by closing the
+// stopped channel - see the type comment for why that panics.
+//
+// The token is what makes that airtight, and q.started alone is not enough.
+// started answers "is the queue running now", which cannot distinguish a
+// legitimate enqueue by the current run from a straggler of a previous one:
+// once the user has stopped a macro and started another, started is true again
+// and the context is live, so a stale caller sails through both guards. Only
+// the caller's own generation says which run it belongs to. gen is compared
+// rather than the channel itself so a stale token is refused rather than
+// silently writing into a discarded buffer.
+//
+// Both guards are kept because each covers a case the other does not: the
+// token catches a caller from a retired generation, and started catches a
+// caller holding the *current* token across a Stop, when the token is still
+// current but nothing is draining the channel.
+//
+// gen, started, ctx and tasks are read in one critical section so the decision
+// is made against a single generation. Two interleavings to be sure of:
+//
+//   - Enqueue lands between Stop's cancel() and its q.started = false (Stop
+//     releases q.mu across cancel and wg.Wait, because a worker finishing a
+//     task can re-enter Enqueue). It sees started == true together with the
+//     old generation, so it either observes the cancelled context and refuses,
+//     or wins the race against cancel() and sends into the old channel, which
+//     newGenerationLocked is about to discard. Both are fine: the task was
+//     submitted while that run was still live, and it dies with it.
+//   - Two Enqueues racing one Stop. Each takes q.mu separately and so gets its
+//     own consistent triple; they may land on opposite sides of the Stop.
+//     Neither can reach the fresh generation, because started is false from
+//     the moment newGenerationLocked publishes it until the next Start, and
+//     both are published under q.mu.
+func (q *TaskQueue) Enqueue(gen uint64, task Task) {
 	q.mu.Lock()
-	ctx, tasks := q.ctx, q.tasks
+	current, started, ctx, tasks := q.gen, q.started, q.ctx, q.tasks
 	q.mu.Unlock()
+
+	if gen != current {
+		log.Printf("Discarding task %s from generation %d: the queue is on generation %d",
+			task.ID, gen, current)
+		return
+	}
+
+	if !started {
+		log.Println("Task queue is stopped. Cannot enqueue task:", task.ID)
+		return
+	}
 
 	// Prefer cancellation: if the queue is already stopped, do not let a
 	// random select pick the (still writable) channel of a dead generation.

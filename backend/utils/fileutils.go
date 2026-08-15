@@ -179,24 +179,31 @@ func writeConfig(path string, cfg Config) error {
 	}
 	tmpPath := tmp.Name()
 
-	if err := writeSyncClose(tmp, data); err != nil {
-		removeIgnoringMissing(tmpPath)
+	if err := WriteSyncClose(tmp, data); err != nil {
+		RemoveIgnoringMissing("config", tmpPath)
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		removeIgnoringMissing(tmpPath)
+		RemoveIgnoringMissing("config", tmpPath)
 		return fmt.Errorf("failed to replace %q: %w", path, err)
 	}
 
 	return nil
 }
 
-// writeSyncClose writes data to file, flushes it to disk and closes it. The
-// Sync is what makes the rename in writeConfig meaningful: renaming a file
-// whose contents are still only in the page cache would leave the settings just
-// as losable as writing them in place.
-func writeSyncClose(file *os.File, data []byte) error {
+// WriteSyncClose writes data to file, flushes it to disk and closes it,
+// reporting whichever step failed.
+//
+// The Sync is what makes the caller's subsequent rename meaningful: renaming a
+// file whose contents are still only in the page cache would leave what was
+// written exactly as losable as writing it in place. Close matters too - on some
+// filesystems it is where a failed write finally surfaces.
+//
+// It is exported and lives here because writeConfig below and writeMacroFile in
+// the backend package each carried a verbatim copy. Two copies of a rule this
+// easy to get subtly wrong are two places to fix it and one to forget.
+func WriteSyncClose(file *os.File, data []byte) error {
 	if _, err := file.Write(data); err != nil {
 		file.Close()
 		return err
@@ -283,9 +290,19 @@ func removeLegacyLastOpened(path string) {
 	}
 }
 
-// removeIgnoringMissing deletes path, logging anything but its absence.
-func removeIgnoringMissing(path string) {
+// RemoveIgnoringMissing deletes path, logging anything except it already being
+// gone. Every caller is cleaning up after a failure it is about to report, so
+// there is nothing here worth a second error.
+//
+// subsystem is the prefix the log line carries - "persistence" or "config". It
+// is a parameter rather than one flattened wording because the two copies this
+// replaces logged different ones, and that difference is diagnostic: it says
+// which writer was unwinding, and the path on its own does not, because both
+// writers clean up a "*.json.tmp" scratch file beside a .json target. Deriving
+// the prefix from the path would be guesswork dressed up as cleverness;
+// naming it is one word per call site and cannot go stale.
+func RemoveIgnoringMissing(subsystem string, path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("config: failed to clean up %q: %v", path, err)
+		log.Printf("%s: failed to clean up %q: %v", subsystem, path, err)
 	}
 }
