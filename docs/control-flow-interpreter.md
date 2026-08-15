@@ -87,8 +87,14 @@ for the actions this app performs. Where it was real (a delay running alongside
 a keypress), it was also unpredictable, which is not a property you want in a
 macro that types into somebody's editor.
 
-If genuine concurrency is ever wanted, it should be an explicit node that says
-so, not an emergent property of having drawn two edges.
+The obvious next thought is that genuine concurrency should come back as an
+explicit node - and it should not, at least not on any evidence this app
+currently offers. There is one mouse and one keyboard; two branches cannot type
+at once in any sense a user would want. The one real case, holding a button
+*while* the cursor moves, already exists as `dragWhileMoving`, a property on
+Mouse Move. That is the shape the genuine concurrency here takes: within an
+action, not between branches. A Parallel node is left out until a concrete case
+turns up that `dragWhileMoving` does not already cover.
 
 ### A node on two paths runs twice
 
@@ -112,6 +118,96 @@ now run twice and where.
 This is the single most important item to agree before any code is written. It
 is the only change that can make an existing macro do something different rather
 than something differently-ordered.
+
+## The gap that is not a node: run state
+
+Nothing currently carries a value between nodes. There are no variables, and a
+node's `data` payload is its own configuration, not somewhere to put a result -
+nodes share only the graph. That is fine for a straight line of actions and it
+is the binding constraint on everything above:
+
+- A **loop** can only be a fixed count. "Retry until it works, up to five times"
+  needs somewhere to keep the five and the count so far.
+- A **branch** can only test the world as it is this instant, never anything
+  remembered. "Did that click work?" is not expressible.
+- Nothing can carry a value forward - a colour that was found, a cursor position
+  worth returning to, a counter.
+
+Every comparable tool has this: Blueprint variables, n8n's item data,
+AutoHotkey's variables. It belongs in **Phase 0**, with the diamond rule, because
+it changes what a Loop node and a Branch node are, and retrofitting it after the
+interpreter ships means opening both again.
+
+It does not have to be much, and it should not be. The proposal is the smallest
+thing that answers the three cases above:
+
+- A **per-run** map of name to string-or-number, created when a run starts and
+  discarded when it ends. Not persisted, not shared between macros, not visible
+  to the frontend except as a debugging read-out. A macro that wants to remember
+  something across runs is a different feature and a much larger one.
+- **Set** by a node - either a dedicated Set Variable node, or an optional
+  "store result as" field on the nodes that produce a result (Wait For Color
+  knows the colour it matched; Mouse Move knows where it ended).
+- **Read** by conditions, and by nothing else to begin with. Interpolating
+  variables into a Type Text node is the obvious next want and the obvious next
+  scope creep; it should wait until the condition case is working.
+
+The run state lives on the run, not on the App, for the same reason the
+generation token exists: a stopped macro's leftovers must not be visible to the
+next one (`33797cb`).
+
+## The node inventory
+
+What the model needs, what it does not, and what is already there and should not
+be.
+
+### Already there and dead: `SVGNode`
+
+`nodeTypes.ts` registers `svgNode`, the palette does not offer it, and
+`tasks.go` has no case for it - so one cannot be created, and one that somehow
+existed in a save file would hit `default:` and report "Unknown task type". It is
+costing maintenance for nothing; it needed its `$$Props` repaired during the
+Svelte Flow 1.x upgrade. Delete it, independently of any of this.
+
+### Needed by the model
+
+- **Branch** - takes a condition, picks an output. Useless without condition
+  *sources*, which means the run state above plus non-blocking world queries:
+  "is the pixel at (x, y) this colour" as opposed to today's blocking Wait For
+  Color, "is this window focused". The cheapest first one is a timeout output on
+  Wait For Color, since that node already knows how to answer the question and
+  currently has nowhere to say no.
+- **Loop** - a count, or a while-condition once state exists.
+- **Stop** - early exit. Once branches exist, "if X, we are done" needs somewhere
+  to go; today the only way a macro ends is running out of edges.
+
+Break and Continue are deliberately absent until nested loops prove they are
+needed.
+
+### Wanted, and nothing to do with this migration
+
+- **Type a string.** `KeyPressNode` is one keystroke by design - `maxlength="1"`,
+  and its comment says so - so typing `hello` is five nodes. This is the largest
+  usability gap in the app and it is independent of everything here. The existing
+  per-layout `character` resolution is exactly what a string needs, applied N
+  times, so the hard part is already solved.
+- **Call another macro.** Genuinely valuable with a graph editor, and it
+  introduces recursion, which interacts directly with the iteration budget. Worth
+  designing rather than adding.
+
+### Deliberately not nodes
+
+- **Concurrency**, for the reason given under fan-out above.
+- **Repetition of a subgraph** is a Loop node; repetition *within one action*
+  stays a property. `numberOfClicks` on Mouse Click is correct where it is - it
+  is one action with its own `clickDelay` timing. A repeat count on every node
+  would be that one idea smeared across six components.
+- **Error handling** should be an output, not a Try/Catch wrapper. The graph
+  already has outputs; an optional "on error" edge from any node is cheaper and
+  more visible than a construct that contains other nodes.
+- **Comments** should be canvas annotations, not nodes. Worth having, but they
+  must never reach `executeTask` - a node type the backend has to know about in
+  order to ignore is one that can go wrong.
 
 ## Semantics to pin
 
@@ -191,8 +287,12 @@ Each phase leaves the tree green - `npm run check`, `npm test`, `go vet`,
 `go test -race` - and is independently revertible, in the same way the Svelte 5
 work was.
 
-**Phase 0 - decide the diamond rule.** No code. Agree the per-arrival semantics
-and the load-time warning above, because everything downstream assumes it.
+**Phase 0 - decide the diamond rule and the run state.** No code. Agree the
+per-arrival semantics and the load-time warning above, because everything
+downstream assumes them; and agree the shape of the run state, because a Loop
+node and a Branch node are different features depending on whether one exists.
+
+`SVGNode` can be deleted at any point and has no dependency on any of this.
 
 **Phase 1 - outcomes, on the current engine.** Change handlers to return
 `(next, err)` while the DAG scheduler still ignores `next`. Pure refactor, no
@@ -206,12 +306,15 @@ load-time warning ships here. The reachability fixtures get a sibling set of
 walk fixtures pinning order and loop termination.
 
 **Phase 3 - branches.** A conditional node type: multi-output handles on the
-frontend (`useUpdateNodeInternals`), a handler returning a named output. No
-scheduler changes - Phase 2 already made this expressible.
+frontend (`useUpdateNodeInternals`), a handler returning a named output, and the
+run state it reads its condition from. No scheduler changes - Phase 2 already
+made this expressible. A timeout output on Wait For Color is the cheapest first
+condition and needs no new world queries.
 
-**Phase 4 - loops and the toggle.** A loop node (count, or until-condition), the
-minimum yield, and `RunMacro` becoming toggle-shaped. Also no scheduler changes:
-a loop is an edge, and by this point an edge is all it needs to be.
+**Phase 4 - loops and the toggle.** A loop node (count, or until-condition), a
+Stop node, the minimum yield, and `RunMacro` becoming toggle-shaped. Also no
+scheduler changes: a loop is an edge, and by this point an edge is all it needs
+to be.
 
 Phases 3 and 4 are where the user-visible features arrive, and both are small
 because Phase 2 did the work.
@@ -232,6 +335,10 @@ JSON fixtures beside the reachability ones:
   `next` ends that path rather than panicking
 - the toggle: a second `RunMacro` while running stops it, and a third starts a
   fresh run with a new generation token
+- run state does not survive a run: a macro that sets a variable, is stopped
+  mid-way, and is started again sees it unset. This is the same hazard as
+  `33797cb` and deserves the same suspicion - leftovers from a stopped macro
+  being visible to the next one is exactly the bug that was fixed there
 
 The frontend's existing 144 tests should need no changes in Phases 1-2; they
 cover node payloads, which this does not touch.
@@ -239,13 +346,16 @@ cover node payloads, which this does not touch.
 ## What this design does not decide
 
 - **The loop node's shape** - fixed count, until-condition, or both. Phase 4.
-- **Whether the Wait For Color node grows a timeout branch.** It is the nearest
-  thing to a condition the app already has, and "on timeout, take the other
-  path" would be the cheapest first conditional - but it is a Phase 3 question.
-- **Nested loop semantics**, which only need answering once loops exist.
-- **Whether `defaultWorkerCount` and the pool are deleted or kept** for a future
-  explicit Parallel node. Keeping the queue costs little and the generation token
-  is needed regardless.
+- **Nested loop semantics**, and with them whether Break and Continue are worth
+  having. Only answerable once loops exist.
+- **Where run state is written from** - a dedicated Set Variable node, or a
+  "store result as" field on the nodes that already produce a result. Phase 0
+  needs to agree that the state exists and what it holds; this is a smaller
+  question that can follow.
+- **Whether `defaultWorkerCount` and the pool are deleted or kept.** With the
+  Parallel node ruled out there is less reason to keep them, but the generation
+  token is needed regardless and the queue costs little, so this can be decided
+  late.
 
 ## Sources
 
