@@ -34,10 +34,24 @@ export const describeError = (error: unknown): string => {
  * ("Failed to fetch", "NetworkError when attempting to fetch resource", "Load
  * failed"), and a missed match only costs a less specific message, never a
  * wrong one.
+ *
+ * The HTML case is the one that is easy to miss, and it is the *common* one.
+ * `npm run dev` serves this app as a SvelteKit SPA with an `index.html`
+ * fallback, so a call to the backend's endpoint is not refused - it is answered,
+ * with 200 and the app's own page. `fetch` is perfectly happy, no TypeError is
+ * raised, and the runtime throws with the page source as the message. Without
+ * this the Projects list dropped that whole document on screen under "Could not
+ * read your saved macros", which reads as corrupted macros rather than as a
+ * frontend that was never connected to anything.
  */
+const looksLikeAnHtmlDocument = (text: string): boolean =>
+	/^\s*(<!doctype html|<html[\s>])/i.test(text);
+
 export const isBackendUnreachable = (error: unknown): boolean => {
 	if (error instanceof TypeError) return true;
-	return /failed to fetch|networkerror|load failed/i.test(describeError(error));
+
+	const text = describeError(error);
+	return /failed to fetch|networkerror|load failed/i.test(text) || looksLikeAnHtmlDocument(text);
 };
 
 /**
