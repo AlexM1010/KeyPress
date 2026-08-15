@@ -1,14 +1,15 @@
 // frontend/src/lib/stores/flow.svelte.ts
 import { writable, type Writable } from 'svelte/store';
-import type { Position, Node, Edge } from '@xyflow/svelte';
+import type { Node, Edge } from '@xyflow/svelte';
 
-export type HandleConfig = {
-    type: 'source' | 'target';
-    position: Position;
-    id?: string;
-    offsetX?: number;
-    offsetY?: number;
-  };
+// `HandleConfig` used to be declared here as well as in
+// `customNodes/types.ts`, character for character, and node components imported
+// it from whichever of the two they happened to reach for first - four from one,
+// three from the other. Two declarations of one type is one that can drift, so
+// this re-exports the node-side declaration rather than repeating it: a handle
+// describes a node's connection points, which is the custom nodes' business
+// rather than the graph store's.
+export type { HandleConfig } from '$lib/components/Workspace/customNodes/types';
 
 /**
  * The `data` payload carried by a node.

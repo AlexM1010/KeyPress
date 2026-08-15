@@ -195,7 +195,6 @@
     message: string;
     nodeId?: string;
   }[]>([]);
-  let isSuccess = $state(false);
 
   // Skipped-node highlight
   // ----------------------
@@ -348,7 +347,6 @@
   async function handleRunFlow() {
     try {
       isExecuting = true;
-      isSuccess = false;
       statusMessages = [];
       // Last run's marks go with last run's messages: the canvas must never
       // show a glow that the status panel no longer explains. The active glow
@@ -843,17 +841,12 @@
 
     eventUnsubscribers.push(Events.On("execution-completed", () => {
       isExecuting = false;
-      isSuccess = true;
       clearActiveNodes();
       addStatusMessage({
         id: `exec-completed-${Date.now()}`,
         type: "success",
         message: "Flow execution completed.",
       });
-      // Reset success state after 3 seconds
-      setTimeout(() => {
-        isSuccess = false;
-      }, 1000);
     }));
 
     // Add save status listeners

@@ -26,7 +26,14 @@
     const DEFAULT_DATA: MouseClickNodeData = {
         buttonType: 'left',
         numberOfClicks: 1,
-        clickDelay: 0.1,
+        // Milliseconds, like every other time field here - `TimeInput` stores ms
+        // whatever unit it is showing. This read 0.1 next to a sibling of 100,
+        // which is the seconds-shaped version of "100ms" and 1000x too small for
+        // the field as it is actually stored: a new node paused 0.1ms between
+        // clicks, so a 10-click node fired all ten as fast as the OS would take
+        // them. Saved macros keep whatever they were saved with - see the note
+        // in the backfill below.
+        clickDelay: 100,
         pressReleaseDelay: 100,
         releaseAfterPress: true,
         scrollDirection: ['Vertical'],
@@ -53,7 +60,6 @@
 
     let showAdvanced = false;
 
-    $: console.log('MouseClickNode data:', JSON.stringify(data));
 
     const NODE_HANDLES: HandleConfig[] = [
         { id: "right", type: "source", position: Position.Right, offsetY: 50 },

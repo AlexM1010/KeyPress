@@ -84,29 +84,55 @@
         customPath: []
     };
 
-    // Reactive statement for data consistency
+    /**
+     * Fill in whatever a persisted node is missing, to the leaf.
+     *
+     * This used to check only the top level, which is not where a payload is
+     * actually incomplete: a node saved with a `speed` object from before
+     * `variance` existed has a `speed`, so the old check passed and left
+     * `speed.variance` undefined - and the Go handler read that field straight
+     * out of the payload. Same for a `startPosition` whose `coordinates` predate
+     * a rename. The backend refuses such a node with a named reason now (see
+     * `readMouseMoveSettings`), which is the right behaviour for a payload it
+     * cannot complete - but it should not be seeing one at all, because the node
+     * that owns the shape is here and can simply fill it in.
+     *
+     * Every assignment is still guarded on the field being absent, and that is
+     * load-bearing rather than tidy: this runs reactively, and the graph's nodes
+     * are deep `$state`, so an unguarded write would invalidate `data`, re-run
+     * this, and write again - forever. Writing only what is missing is what lets
+     * it settle after one pass. It also means a saved value is never overwritten,
+     * which is the same promise the other nodes' one-shot `Object.assign` makes.
+     */
     $: {
-        if (data?.startPosition == null) data.startPosition = { type: 'Mouse', coordinates: { x: 0, y: 0 } };
-        if (data?.endPosition == null) data.endPosition = { type: 'Fixed', coordinates: { x: 0, y: 0 } };
-        if (data?.dragWhileMoving == null) data.dragWhileMoving = false;
-        if (data?.speed == null) {
-            data.speed = {
-                type: 'Instant',
-                value: 500,
-                randomize: false,
-                variance: 20
-            };
-        }
-        if (data?.pathType == null) data.pathType = 'Straight';
-        if (data?.customPath == null) data.customPath = [];
+        if (data.startPosition == null) data.startPosition = { type: 'Mouse', coordinates: { x: 0, y: 0 } };
+        if (data.startPosition.type == null) data.startPosition.type = 'Mouse';
+        if (data.startPosition.coordinates == null) data.startPosition.coordinates = { x: 0, y: 0 };
+        if (data.startPosition.coordinates.x == null) data.startPosition.coordinates.x = 0;
+        if (data.startPosition.coordinates.y == null) data.startPosition.coordinates.y = 0;
+
+        if (data.endPosition == null) data.endPosition = { type: 'Fixed', coordinates: { x: 0, y: 0 } };
+        if (data.endPosition.type == null) data.endPosition.type = 'Fixed';
+        if (data.endPosition.coordinates == null) data.endPosition.coordinates = { x: 0, y: 0 };
+        if (data.endPosition.coordinates.x == null) data.endPosition.coordinates.x = 0;
+        if (data.endPosition.coordinates.y == null) data.endPosition.coordinates.y = 0;
+
+        if (data.dragWhileMoving == null) data.dragWhileMoving = false;
+
+        if (data.speed == null) data.speed = { type: 'Instant', value: 500, randomize: false, variance: 20 };
+        if (data.speed.type == null) data.speed.type = 'Instant';
+        if (data.speed.value == null) data.speed.value = 500;
+        if (data.speed.randomize == null) data.speed.randomize = false;
+        if (data.speed.variance == null) data.speed.variance = 20;
+
+        if (data.pathType == null) data.pathType = 'Straight';
+        if (data.customPath == null) data.customPath = [];
     }
 
 
     // Local UI state
     let showMovementSettings = false;
 
-    // Debug logging
-    $: console.log('MouseMoveNode data:', JSON.stringify(data));
 
     /**
      * Node connection handle configuration

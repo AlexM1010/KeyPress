@@ -46,12 +46,29 @@ describe('MouseClickNode', () => {
 		expect(data).toEqual({
 			buttonType: 'right',
 			numberOfClicks: 3,
-			clickDelay: 0.1,
+			clickDelay: 100,
 			pressReleaseDelay: 100,
 			releaseAfterPress: true,
 			scrollDirection: ['Vertical'],
 			scrollLines: 0
 		});
+	});
+
+	it('defaults the two delays to the same unit', () => {
+		const { data } = renderNode(MouseClickNode, {} as MouseClickNodeData);
+
+		// Both are milliseconds - that is what `TimeInput` stores whatever unit it
+		// is displaying, and what the Go handler multiplies by time.Millisecond.
+		// `clickDelay` defaulted to 0.1 next to a `pressReleaseDelay` of 100: the
+		// seconds-shaped spelling of "100ms", and so 1000x too small for the field
+		// as it is actually stored. 0.1ms is not a pause, so a multi-click node
+		// fired every click as fast as the OS would take them - and the box showed
+		// "0", because 0.1ms is nothing to two decimal places in seconds.
+		//
+		// Asserted as a pair rather than as a number, since the bug was the two
+		// disagreeing about what the field means.
+		expect(data.clickDelay).toBe(data.pressReleaseDelay);
+		expect(data.clickDelay).toBe(100);
 	});
 
 	it('leaves saved values alone when backfilling', () => {

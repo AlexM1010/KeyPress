@@ -30,6 +30,97 @@ const defaultMouseSleep = 100
 // delay tasks are unaffected and still run concurrently.
 var mouseMu sync.Mutex
 
+// numberIn reads a numeric field out of a decoded node payload.
+//
+// Every number in a saved macro arrives as a float64, because that is what
+// encoding/json decodes a JSON number into - there is no integer case to
+// handle, and asserting to one would fail on every value. This exists so the
+// assertion is written once rather than at each field, and so a missing field
+// and a field of the wrong type are the same answer to the caller: not usable.
+func numberIn(data map[string]interface{}, key string) (float64, bool) {
+	value, ok := data[key].(float64)
+	return value, ok
+}
+
+// mouseMoveFailed reports a mouse-move node that could not be read, in the
+// shape the frontend's status panel already listens for.
+//
+// Every one of these used to be five lines repeated inline, which is most of
+// why the movement settings below were left as bare assertions instead: the
+// cost of checking a field was a paragraph. It is a line now.
+func mouseMoveFailed(task Task, app *App, reason string) {
+	log.Printf("MoveMouse error: %s for task %s", reason, task.ID)
+	app.emitEvent("task-error", map[string]interface{}{
+		"taskID": task.ID,
+		"error":  reason,
+	})
+}
+
+// mouseMoveSettings is everything a mouse-move node says about *how* to move,
+// as opposed to where.
+type mouseMoveSettings struct {
+	speedType       string
+	speedValue      float64
+	randomize       bool
+	variance        float64
+	pathType        string
+	dragWhileMoving bool
+}
+
+// readMouseMoveSettings pulls those settings out of a decoded node payload,
+// returning the reason it could not as a non-empty string.
+//
+// A function rather than a run of assertions inside the handler, because the
+// handler moves the real mouse and so cannot be unit tested, while this is the
+// half that actually gets a saved macro wrong. It used to be six bare type
+// assertions: a node missing any of these fields - which a hand-edited file, or
+// a macro saved before a field existed, can easily be - panicked mid-run.
+// `executeTask` recovers, so the app survived, but the user got "panic:
+// interface conversion" with nothing saying which field was at fault.
+//
+// The line between "report it" and "fall back" is whether the run can mean
+// anything without the field. A speed or a path type cannot be guessed. But
+// `randomize` and `variance` only matter when randomisation is on, and
+// `dragWhileMoving` absent plainly means no drag, so those three take a default
+// rather than failing a macro that predates them.
+func readMouseMoveSettings(data map[string]interface{}) (mouseMoveSettings, string) {
+	speed, ok := data["speed"].(map[string]interface{})
+	if !ok {
+		return mouseMoveSettings{}, "Invalid or missing speed settings"
+	}
+
+	speedType, ok := speed["type"].(string)
+	if !ok {
+		return mouseMoveSettings{}, "Invalid or missing speed type"
+	}
+
+	speedValue, ok := numberIn(speed, "value")
+	if !ok {
+		return mouseMoveSettings{}, "Invalid or missing speed value"
+	}
+
+	pathType, ok := data["pathType"].(string)
+	if !ok {
+		return mouseMoveSettings{}, "Invalid or missing path type"
+	}
+
+	randomize, _ := speed["randomize"].(bool)
+	variance, hasVariance := numberIn(speed, "variance")
+	if !hasVariance {
+		variance = 0
+	}
+	dragWhileMoving, _ := data["dragWhileMoving"].(bool)
+
+	return mouseMoveSettings{
+		speedType:       speedType,
+		speedValue:      speedValue,
+		randomize:       randomize,
+		variance:        variance,
+		pathType:        pathType,
+		dragWhileMoving: dragWhileMoving,
+	}, ""
+}
+
 // executeMouseMoveTask moves the cursor between the configured positions.
 func executeMouseMoveTask(task Task, app *App) {
 	log.Printf("MoveMouse task starting - Data: %+v", task.Data)
@@ -44,12 +135,7 @@ func executeMouseMoveTask(task Task, app *App) {
 	startPos, ok1 := task.Data["startPosition"].(map[string]interface{})
 	endPos, ok2 := task.Data["endPosition"].(map[string]interface{})
 	if !ok1 || !ok2 {
-		err := "Invalid or missing position configurations"
-		log.Printf("MoveMouse error: %s for task %s", err, task.ID)
-		app.emitEvent("task-error", map[string]interface{}{
-			"taskID": task.ID,
-			"error":  err,
-		})
+		mouseMoveFailed(task, app, "Invalid or missing position configurations")
 		return
 	}
 
@@ -63,16 +149,19 @@ func executeMouseMoveTask(task Task, app *App) {
 	} else {
 		coords, ok := startPos["coordinates"].(map[string]interface{})
 		if !ok {
-			err := "Invalid start coordinates"
-			log.Printf("MoveMouse error: %s for task %s", err, task.ID)
-			app.emitEvent("task-error", map[string]interface{}{
-				"taskID": task.ID,
-				"error":  err,
-			})
+			mouseMoveFailed(task, app, "Invalid start coordinates")
 			return
 		}
-		startX = coords["x"].(float64)
-		startY = coords["y"].(float64)
+		startX, ok = numberIn(coords, "x")
+		if !ok {
+			mouseMoveFailed(task, app, "Invalid start coordinates")
+			return
+		}
+		startY, ok = numberIn(coords, "y")
+		if !ok {
+			mouseMoveFailed(task, app, "Invalid start coordinates")
+			return
+		}
 	}
 
 	// Move to start position if not already there
@@ -85,26 +174,34 @@ func executeMouseMoveTask(task Task, app *App) {
 	} else {
 		coords, ok := endPos["coordinates"].(map[string]interface{})
 		if !ok {
-			err := "Invalid end coordinates"
-			log.Printf("MoveMouse error: %s for task %s", err, task.ID)
-			app.emitEvent("task-error", map[string]interface{}{
-				"taskID": task.ID,
-				"error":  err,
-			})
+			mouseMoveFailed(task, app, "Invalid end coordinates")
 			return
 		}
-		endX = coords["x"].(float64)
-		endY = coords["y"].(float64)
+		endX, ok = numberIn(coords, "x")
+		if !ok {
+			mouseMoveFailed(task, app, "Invalid end coordinates")
+			return
+		}
+		endY, ok = numberIn(coords, "y")
+		if !ok {
+			mouseMoveFailed(task, app, "Invalid end coordinates")
+			return
+		}
 	}
 
-	// Extract movement settings
-	speed := task.Data["speed"].(map[string]interface{})
-	speedType := speed["type"].(string)
-	speedValue := speed["value"].(float64)
-	randomize := speed["randomize"].(bool)
-	variance := speed["variance"].(float64)
-	pathType := task.Data["pathType"].(string)
-	dragWhileMoving := task.Data["dragWhileMoving"].(bool)
+	// Extract movement settings. Read as one unit so the reading can be tested
+	// without a mouse attached - see `readMouseMoveSettings`.
+	settings, reason := readMouseMoveSettings(task.Data)
+	if reason != "" {
+		mouseMoveFailed(task, app, reason)
+		return
+	}
+	speedType := settings.speedType
+	speedValue := settings.speedValue
+	randomize := settings.randomize
+	variance := settings.variance
+	pathType := settings.pathType
+	dragWhileMoving := settings.dragWhileMoving
 
 	// Calculate final speed with randomization if enabled
 	finalSpeed := speedValue
@@ -117,7 +214,25 @@ func executeMouseMoveTask(task Task, app *App) {
 	// Set mouse movement speed based on configuration
 	robotgo.MouseSleep = int(finalSpeed) // Convert to appropriate sleep value
 
-	// Start drag if required
+	// Start drag if required.
+	//
+	// The release is deferred as well as done explicitly below, and that is the
+	// point rather than belt-and-braces: between here and there the handler
+	// moves the cursor, and if any of that panics - or a later edit adds an
+	// early return - the left button stays physically down after the task ends.
+	// `executeTask` recovers from the panic, so the app keeps running and the
+	// user is left holding a drag they never started, over whatever window
+	// happens to be under the cursor, with no way to end it but to click. A
+	// deferred release costs nothing and cannot leave that behind.
+	dragging := false
+	defer func() {
+		if dragging {
+			if err := robotgo.MouseUp("left"); err != nil {
+				log.Printf("MouseUp error during cleanup: %v for task %s", err, task.ID)
+			}
+		}
+	}()
+
 	if dragWhileMoving {
 		if err := robotgo.MouseDown("left"); err != nil {
 			log.Printf("MouseDown error: %v for task %s", err, task.ID)
@@ -127,6 +242,7 @@ func executeMouseMoveTask(task Task, app *App) {
 			})
 			return
 		}
+		dragging = true
 	}
 
 	// Execute movement based on configuration
@@ -153,8 +269,11 @@ func executeMouseMoveTask(task Task, app *App) {
 		}
 	}
 
-	// Release drag if active
-	if dragWhileMoving {
+	// Release drag if active. Reported here, where a failure is worth telling
+	// the user about; the deferred release above is only a backstop and stays
+	// quiet once this has run.
+	if dragging {
+		dragging = false
 		if err := robotgo.MouseUp("left"); err != nil {
 			log.Printf("MouseUp error: %v for task %s", err, task.ID)
 			app.emitEvent("task-error", map[string]interface{}{
@@ -217,17 +336,23 @@ func executeMouseClickTask(task Task, app *App) {
 		return
 	}
 
-	// Get clickDelay
+	// Get clickDelay. Both of these are in **milliseconds** - that is what the
+	// node's TimeInput stores whatever unit it happens to be displaying - so the
+	// fallback is 100, not 0.1. It read 0.1 with a comment claiming 100ms, which
+	// is the same number the seconds-based reading of the field would want and
+	// exactly 1000x too small for the field as it is actually stored: 0.1ms is no
+	// pause at all, so a node that fell back to it fired its clicks as fast as
+	// the OS would take them.
 	clickDelay, ok := task.Data["clickDelay"].(float64)
 	if !ok {
-		clickDelay = 0.1 // Default delay of 100ms
+		clickDelay = 100
 	}
 	clickDuration := time.Duration(clickDelay) * time.Millisecond
 
 	// Get pressReleaseDelay and releaseAfterPress
 	pressReleaseDelay, ok := task.Data["pressReleaseDelay"].(float64)
 	if !ok {
-		pressReleaseDelay = 0.1 // Default press duration of 100ms
+		pressReleaseDelay = 100
 	}
 	pressDuration := time.Duration(pressReleaseDelay) * time.Millisecond
 
@@ -257,8 +382,15 @@ func executeMouseClickTask(task Task, app *App) {
 	scrollDirections, _ := task.Data["scrollDirection"].([]interface{})
 	scrollLines, hasScrollLines := task.Data["scrollLines"].(float64)
 
-	// Handle scrolling if configured
-	if len(scrollDirections) > 0 && hasScrollLines && scrollLines > 0 {
+	// Handle scrolling if configured.
+	//
+	// `!= 0` rather than `> 0`. The sign is the direction - it is the only way
+	// the node can express one, since the UI offers an axis and a line count and
+	// nothing else - so a `> 0` guard silently threw away every scroll up or
+	// left. The node's own input accepts down to -100000, so those macros were
+	// accepted, saved, and then quietly did nothing. Zero still means no scroll,
+	// which is why this is not simply dropped.
+	if len(scrollDirections) > 0 && hasScrollLines && scrollLines != 0 {
 		for _, dir := range scrollDirections {
 			direction, ok := dir.(string)
 			if !ok {
@@ -270,11 +402,16 @@ func executeMouseClickTask(task Task, app *App) {
 
 			switch direction {
 			case "Vertical":
-				// For vertical scrolling, positive is down, negative is up
+				// Positive is down, negative is up: ScrollDir(x, "down") is
+				// Scroll(0, -x), so a negative count inverts by itself.
 				robotgo.ScrollDir(scrollAmount, "down")
 			case "Horizontal":
-				// For horizontal scrolling, we use the x,y coordinates method
-				// Positive scrollAmount moves right, negative moves left
+				// Positive is **left**, negative is right - robotgo's own
+				// ScrollDir maps "left" to Scroll(x, 0) and "right" to
+				// Scroll(-x, 0). The comment here used to claim the opposite;
+				// the call is left as it was rather than flipped to match it,
+				// because positive counts already worked and already scrolled
+				// left, and any macro relying on that would silently reverse.
 				robotgo.Scroll(scrollAmount, 0)
 			}
 			time.Sleep(100 * time.Millisecond)

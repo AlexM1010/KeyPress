@@ -55,6 +55,36 @@ function persisted(data: MouseMoveData): MouseMoveData {
 }
 
 describe('MouseMoveNode', () => {
+	it('backfills a nested field a saved node is missing, not just a top-level one', () => {
+		// The shape that used to slip through. A node saved before `variance`
+		// existed still *has* a `speed`, so a check that only asked whether
+		// `speed` was null passed and left `speed.variance` undefined - and the
+		// Go handler read that field straight out of the payload, where a bare
+		// type assertion turned it into a panic mid-macro. Same story for a
+		// `startPosition` whose `coordinates` predate it.
+		const { data } = renderNode(MouseMoveNode, {
+			startPosition: { type: 'Fixed' },
+			endPosition: { type: 'Fixed', coordinates: { x: 800 } },
+			speed: { type: 'Human', value: 300 },
+			pathType: 'Human'
+		} as unknown as MouseMoveData);
+
+		expect(data.startPosition.coordinates).toEqual({ x: 0, y: 0 });
+		// The half that was there is kept; only the missing half is filled.
+		expect(data.endPosition.coordinates).toEqual({ x: 800, y: 0 });
+		expect(data.speed.randomize).toBe(false);
+		expect(data.speed.variance).toBe(20);
+		expect(data.dragWhileMoving).toBe(false);
+		expect(data.customPath).toEqual([]);
+
+		// And the whole thing survives the trip to the file as numbers, since
+		// that is what the backend asserts them to be.
+		const persisted = persistedData(data, 'MouseMoveNode');
+		const speed = persisted.speed as MouseMoveData['speed'];
+		expect(typeof speed.value).toBe('number');
+		expect(typeof speed.variance).toBe('number');
+	});
+
 	it('backfills newer fields into a payload saved before they existed', () => {
 		// A macro saved when the node was two coordinates and nothing else. The
 		// backfill has to reach it in place, or `data.endPosition.type` in the
