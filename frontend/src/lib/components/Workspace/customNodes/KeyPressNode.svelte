@@ -9,6 +9,7 @@
     import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
     import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
+    import { markGraphEdited } from '$lib/stores/flow';
     import type { HandleConfig } from './types';
 
     /**
@@ -248,6 +249,31 @@
      */
     function selectCharacter(event: Event): void {
         (event.currentTarget as HTMLInputElement).select();
+    }
+
+    /**
+     * The other half of the by-reference contract: mutating `data` puts the edit
+     * in the store, this announces it. Every binding and handler in this file
+     * assigns to a property of `data`, which invalidates `data` here and re-runs
+     * this - see `markGraphEdited`.
+     *
+     * Declared last, and that is not tidiness. `syncModifiers` writes
+     * `data.modifiers` from inside a reactive statement, and the compiler cannot
+     * see that through the function call, so it puts no ordering constraint on
+     * the two. Svelte then runs them in source order and re-reads the dirty
+     * flags between statements: after `syncModifiers`, a modifier ticked on the
+     * keyboard tab is announced in the same pass. Before it, the write lands
+     * after this has already run and the edit goes out unannounced - the macro
+     * would look saved with a modifier the file does not have. Anything else
+     * that comes to write `data` reactively belongs above this too.
+     *
+     * The backfill at the top of the file is a plain call that assigns nothing,
+     * so it does not fire this. The once-on-init run does, and is harmless: the
+     * unsaved-changes baseline is taken a frame after the nodes mount.
+     */
+    $: {
+        data;
+        markGraphEdited();
     }
 
     $$restProps;

@@ -20,6 +20,11 @@
   };
 
   export let id: $$Props["id"];
+  // Read-only, unlike every other node's payload: this node draws whatever
+  // shape, size and label it is handed and offers the user no control that
+  // could change any of them. That is why it is the one node component with no
+  // `markGraphEdited()` call - it has no edit to announce. Give it an editable
+  // control and it needs one, the way the others do.
   export let data: $$Props["data"];
   export let selected: $$Props["selected"] = false;
   export let isConnectable: $$Props["isConnectable"] = true;

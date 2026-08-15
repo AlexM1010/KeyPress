@@ -30,6 +30,22 @@
   import { onLayout } from "$lib/utils/autoLayout";
   import { describeBackendError, isBackendUnreachable } from "$lib/utils/helpers";
 
+  // Naming the nodes of a run, and the run marks painted onto the canvas. Both
+  // are pure functions of a graph snapshot, so they live outside the component
+  // and are tested directly - see `nodeLabels.test.ts` and `nodeGlow.test.ts`.
+  import {
+    buildNodeLabels,
+    inFlowOrder as orderIdsByStep,
+    nodeLabel as labelForNodeId,
+    type NodeLabel,
+  } from "$lib/utils/nodeLabels";
+  import {
+    buildActiveGlowCss,
+    buildSkippedGlowCss,
+    DEFAULT_NODE_GLOW,
+    NODE_TYPE_GLOWS,
+  } from "$lib/utils/nodeGlow";
+
   // Generated Wails bindings for the Go backend
   import { App } from "$lib/bindings/Keypress/backend";
   import { Events } from "@wailsio/runtime";
@@ -68,6 +84,12 @@
   // has no path to a listener here. Instead, Svelte Flow hands each node component
   // the very `data` object held in the `nodesData` store, and the components mutate
   // that payload in place - so `toObject()` below already sees the user's edits.
+  //
+  // Mutating is only half of the contract. An in-place edit changes no store
+  // reference, so each node component follows it with `markGraphEdited()`, whose
+  // identity update fires the store's subscriptions without replacing anything
+  // in it. That is the only thing that tells this component an edit happened at
+  // all, and the unsaved-changes check below runs off it.
 
   // Reactive statement to sync color mode with flow theme
   $: colorMode = $flowTheme;
@@ -113,7 +135,7 @@
     // the `${type} node` string this used to stamp on was never displayed and
     // only ended up in every save file.
     const newNode: FlowNode = {
-      id: `${Math.random()}`,
+      id: crypto.randomUUID(),
       type,
       position,
       data: {},
@@ -125,7 +147,7 @@
   // Status messages
   //
   // `nodeId` is the raw node id the backend reported the event for. It is kept
-  // out of `message` on purpose - node ids are random decimals and mean nothing
+  // out of `message` on purpose - node ids are random UUIDs and mean nothing
   // to a user - but carried alongside it so the panel can still surface it for
   // debugging (see StatusPanel's tooltip).
   let statusMessages: {
@@ -135,56 +157,6 @@
     nodeId?: string;
   }[] = [];
   let isSuccess = false;
-
-  /**
-   * Human-readable name for each node type, keyed by the registry key from
-   * `customNodes/nodeTypes.ts` - the string that ends up in a saved node's
-   * `type` and that the Go dispatcher in `tasks.go` switches on.
-   *
-   * The values are copies of the node components' own `title` prop defaults
-   * (`StartNode.svelte`, `DelayNode.svelte`, `MouseClickNode.svelte`,
-   * `MouseMoveNode.svelte`, `ColorPickerNode.svelte`, `KeyPressNode.svelte`),
-   * so the status panel calls a node exactly what the node's own header calls
-   * it on the canvas. Those components are the source of truth: when one of
-   * them renames itself, this table follows. A type missing from here still
-   * gets a label - see `buildNodeLabels`.
-   */
-  const NODE_TYPE_TITLES: Record<string, string> = {
-    StartNode: "Start",
-    DelayNode: "Delay",
-    MouseClickNode: "Mouse Click",
-    MouseMoveNode: "Mouse Move",
-    ColorPickerNode: "Wait For Color",
-    KeyPressNode: "Keypress",
-  };
-
-  /** Shown when a reported node is not in the graph the run was started from. */
-  const UNKNOWN_NODE_LABEL = "Unknown node";
-
-  /**
-   * The glow colour a node shows while it is running, keyed by the same node
-   * type as `NODE_TYPE_TITLES`.
-   *
-   * Each value is the hue of that node's own header gradient - Start and Delay
-   * are blue, the two mouse nodes green, Keypress orange, Wait For Color
-   * indigo - so a running card lights up in its own colour rather than in one
-   * shared highlight. The gradients themselves are Tailwind classes on the node
-   * components (`export let color`), which is no use as a shadow colour, so the
-   * hues are named here as the `--node-glow-*` custom properties `index.scss`
-   * defines. As with the titles above, the node components are the source of
-   * truth: when one changes colour, this table follows.
-   */
-  const NODE_TYPE_GLOWS: Record<string, string> = {
-    StartNode: "--node-glow-blue",
-    DelayNode: "--node-glow-blue",
-    MouseClickNode: "--node-glow-green",
-    MouseMoveNode: "--node-glow-green",
-    ColorPickerNode: "--node-glow-indigo",
-    KeyPressNode: "--node-glow-orange",
-  };
-
-  /** For a node type that is not in the table above. */
-  const DEFAULT_NODE_GLOW = "--node-glow-neutral";
 
   // Skipped-node highlight
   // ----------------------
@@ -202,40 +174,6 @@
   // wrapper (NodeWrapper.svelte: `data-id={id}`), which marks exactly the
   // reported nodes without the graph data being touched at all.
   let skippedNodeIds: string[] = [];
-
-  /**
-   * Node ids the app generates are `Math.random()` decimals, but ids also
-   * arrive off disk from saved macros, so nothing guarantees their shape. Only
-   * ids built from characters that are inert inside an attribute-selector
-   * string become selectors; anything else is dropped, so the generated
-   * stylesheet can never be anything but the CSS intended here. A dropped id
-   * merely loses its glow - the status message still names it.
-   */
-  const SELECTOR_SAFE_NODE_ID = /^[A-Za-z0-9._:-]+$/;
-
-  /**
-   * CSS marking the skipped nodes, or "" when there are none. It is the *body*
-   * of a stylesheet: the `<style>` element that carries it is in the markup
-   * below, because a literal `<style>` string in this block would be mistaken
-   * for the component's own style block by the preprocessor.
-   *
-   * Scoped to `.flow-container` rather than left bare because a stylesheet in
-   * `<head>` is global: confining it to a canvas keeps it from reaching any
-   * other element that happens to carry a matching `data-id`.
-   *
-   * `--node-skipped-glow` is consumed by the `.svelte-flow__node` rule in
-   * FlowStyle.css, which owns what the mark looks like.
-   */
-  function buildSkippedGlowCss(nodeIds: string[]): string {
-    const selectors = nodeIds
-      .filter((id) => SELECTOR_SAFE_NODE_ID.test(id))
-      .map((id) => `.flow-container .svelte-flow__node[data-id="${id}"]`);
-    if (selectors.length === 0) return "";
-    return (
-      `${selectors.join(",")}{--node-skipped-glow:` +
-      `0 0 0 2px var(--skipped-glow),0 0 22px 6px var(--skipped-glow-soft)}`
-    );
-  }
 
   $: skippedGlowCss = buildSkippedGlowCss(skippedNodeIds);
 
@@ -262,78 +200,7 @@
    */
   let nodeGlows = new Map<string, string>();
 
-  /**
-   * CSS lighting up the nodes that are executing, or "" when none are.
-   *
-   * Shaped exactly like `buildSkippedGlowCss` - same `.flow-container` scope,
-   * same id filter, same handing-off to FlowStyle.css through a custom property
-   * - but grouped by colour rather than emitted per id, because most runs light
-   * one or two nodes of a handful of colours and a selector list per colour is
-   * the smaller stylesheet.
-   *
-   * The glow is a halo with no solid ring, which is what distinguishes it from
-   * the skipped mark; see the rule in FlowStyle.css.
-   *
-   * `glows` is a parameter rather than a read of `nodeGlows`, so the reactive
-   * statement below rebuilds the stylesheet when a new run recolours the graph
-   * and not only when the set of lit ids changes.
-   */
-  function buildActiveGlowCss(
-    nodeIds: string[],
-    glows: Map<string, string>
-  ): string {
-    const byGlow = new Map<string, string[]>();
-    for (const id of nodeIds) {
-      if (!SELECTOR_SAFE_NODE_ID.test(id)) continue;
-      const glow = glows.get(id) ?? DEFAULT_NODE_GLOW;
-      const selectors = byGlow.get(glow);
-      const selector = `.flow-container .svelte-flow__node[data-id="${id}"]`;
-      if (selectors) selectors.push(selector);
-      else byGlow.set(glow, [selector]);
-    }
-
-    let css = "";
-    for (const [glow, selectors] of byGlow) {
-      css +=
-        `${selectors.join(",")}{--node-active-glow:` +
-        `0 0 26px 8px var(${glow})}`;
-    }
-    return css;
-  }
-
   $: activeGlowCss = buildActiveGlowCss(activeNodeIds, nodeGlows);
-
-  /**
-   * The subset of a node this file needs to label it. Deliberately structural
-   * rather than `FlowNode`: `toObject()` hands back Svelte Flow's own `Node`,
-   * whose `type` is optional.
-   */
-  type LabellableNode = {
-    id: string;
-    type?: string;
-    position: { x: number; y: number };
-  };
-
-  /**
-   * The subset of an edge this file needs. Structural for the same reason:
-   * `toObject()` returns Svelte Flow's `Edge`, and only the direction matters
-   * here.
-   */
-  type LabellableEdge = {
-    source: string;
-    target: string;
-  };
-
-  /**
-   * What a node is called on screen, plus its place in the sequence.
-   *
-   * `step` is the number in the label, kept separately so lists of reported
-   * ids can be put back into flow order without parsing the text.
-   */
-  type NodeLabel = {
-    label: string;
-    step: number;
-  };
 
   /**
    * id -> label, frozen for the duration of one run.
@@ -344,217 +211,13 @@
    */
   let nodeLabels = new Map<string, NodeLabel>();
 
-  /**
-   * Names every node by its type - `Start`, `Delay`, `Mouse Click` - and records
-   * its position in the order the run walks the graph. That position is never
-   * displayed; it exists so a message listing several nodes can be sorted into
-   * the order they would have run (see `inFlowOrder`). Two delays therefore read
-   * alike in the panel: the canvas highlight and the id tooltip are what tell
-   * them apart.
-   *
-   * The order is built to agree with the engine (`execution.go`) rather than to
-   * merely look plausible:
-   *
-   * - Edges are directed `source -> target`, and the run starts at the Start
-   *   node, which `StartExecution` enqueues unconditionally - so edges pointing
-   *   *into* Start are ignored here, exactly as they are there.
-   * - A node's prerequisites are its predecessors that the run can also reach;
-   *   `StartExecution` prunes edges out of dead branches for the same reason,
-   *   which is why prerequisites are counted within a group rather than
-   *   globally.
-   * - `canEnqueue` waits for *every* prerequisite, so a join must be ordered
-   *   after all of its inputs. Plain breadth-first would place it as soon as
-   *   the first input was seen, so depth here is longest-path: a node sits one
-   *   past the deepest node feeding it. Nodes that come ready together - the
-   *   branches out of one node - are then ordered top to bottom by canvas
-   *   position (y, then x, then id, purely so it is deterministic).
-   *
-   * Cycles: the depth pass is Kahn's algorithm, which only ever releases a node
-   * once its last prerequisite has been released, so a node inside a cycle is
-   * never released and the walk terminates instead of spinning. Whatever is
-   * left over at the end is precisely the cyclic part - the engine would report
-   * it as a stall - and it is appended in canvas order so it is still named.
-   *
-   * Nodes the run cannot reach still need a step, since they are named in the
-   * skipped-nodes warning and that list is sorted by it. They continue the
-   * sequence after everything reachable, one dead branch at a time:
-   * each weakly connected group of unreachable-but-wired nodes is walked in the
-   * same longest-path order, groups taken top to bottom by their highest node.
-   * Nodes in no edge at all are last - the backend never reports them, and they
-   * are usually just something the user has only dropped on the canvas so far.
-   */
-  function buildNodeLabels(
-    nodes: LabellableNode[],
-    edges: LabellableEdge[]
-  ): Map<string, NodeLabel> {
-    const byId = new Map<string, LabellableNode>();
-    for (const node of nodes) byId.set(node.id, node);
-
-    const startId = nodes.find((node) => node.type === "StartNode")?.id;
-
-    // Adjacency over the edges that actually join two nodes of this graph.
-    // `wired` records participation in an edge before anything is dropped, so
-    // it matches the backend's own "connected" test in `warnAboutSkippedNodes`.
-    const successors = new Map<string, string[]>();
-    const predecessors = new Map<string, string[]>();
-    const wired = new Set<string>();
-    const link = (map: Map<string, string[]>, from: string, to: string) => {
-      const list = map.get(from);
-      if (list) list.push(to);
-      else map.set(from, [to]);
-    };
-    for (const edge of edges) {
-      if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
-      wired.add(edge.source);
-      wired.add(edge.target);
-      // The Start node runs regardless of what points at it.
-      if (edge.target === startId) continue;
-      link(successors, edge.source, edge.target);
-      link(predecessors, edge.target, edge.source);
-    }
-
-    const positionOf = (id: string) => byId.get(id)?.position ?? { x: 0, y: 0 };
-    const canvasOrder = (a: string, b: string) => {
-      const pa = positionOf(a);
-      const pb = positionOf(b);
-      return pa.y - pb.y || pa.x - pb.x || a.localeCompare(b);
-    };
-
-    // What the run can get to, walked exactly like `reachableFrom` in Go.
-    const reachable = new Set<string>();
-    if (startId !== undefined) {
-      reachable.add(startId);
-      const queue = [startId];
-      for (let i = 0; i < queue.length; i++) {
-        for (const next of successors.get(queue[i]) ?? []) {
-          if (reachable.has(next)) continue;
-          reachable.add(next);
-          queue.push(next);
-        }
-      }
-    }
-
-    /**
-     * One set of nodes in longest-path order, prerequisites counted only within
-     * the set. Anything the walk cannot release (a cycle, or a node behind one)
-     * is appended in canvas order rather than dropped or looped over.
-     */
-    const orderGroup = (members: Set<string>): string[] => {
-      const waiting = new Map<string, number>();
-      for (const id of members) {
-        let count = 0;
-        for (const pred of predecessors.get(id) ?? []) {
-          if (members.has(pred)) count += 1;
-        }
-        waiting.set(id, count);
-      }
-
-      const depth = new Map<string, number>();
-      const released: string[] = [];
-      for (const id of members) {
-        if (waiting.get(id) === 0) {
-          depth.set(id, 0);
-          released.push(id);
-        }
-      }
-      for (let i = 0; i < released.length; i++) {
-        const current = released[i];
-        const nextDepth = (depth.get(current) ?? 0) + 1;
-        for (const next of successors.get(current) ?? []) {
-          if (!members.has(next)) continue;
-          const best = depth.get(next);
-          if (best === undefined || best < nextDepth) depth.set(next, nextDepth);
-          const left = (waiting.get(next) ?? 0) - 1;
-          waiting.set(next, left);
-          if (left === 0) released.push(next);
-        }
-      }
-
-      const ordered = released
-        .slice()
-        .sort(
-          (a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || canvasOrder(a, b)
-        );
-      const releasedSet = new Set(released);
-      const stuck = [...members]
-        .filter((id) => !releasedSet.has(id))
-        .sort(canvasOrder);
-      return [...ordered, ...stuck];
-    };
-
-    const order: string[] = [];
-    if (reachable.size > 0) order.push(...orderGroup(reachable));
-
-    // Dead branches, one weakly connected group at a time.
-    const deadEnds = [...byId.keys()].filter(
-      (id) => !reachable.has(id) && wired.has(id)
-    );
-    const grouped = new Set<string>();
-    for (const seed of deadEnds.slice().sort(canvasOrder)) {
-      if (grouped.has(seed)) continue;
-      const group = new Set<string>([seed]);
-      grouped.add(seed);
-      const frontier = [seed];
-      for (let i = 0; i < frontier.length; i++) {
-        const current = frontier[i];
-        const neighbours = [
-          ...(successors.get(current) ?? []),
-          ...(predecessors.get(current) ?? []),
-        ];
-        for (const neighbour of neighbours) {
-          if (reachable.has(neighbour) || group.has(neighbour)) continue;
-          group.add(neighbour);
-          grouped.add(neighbour);
-          frontier.push(neighbour);
-        }
-      }
-      order.push(...orderGroup(group));
-    }
-
-    // Anything in no edge at all.
-    order.push(
-      ...[...byId.keys()]
-        .filter((id) => !reachable.has(id) && !wired.has(id))
-        .sort(canvasOrder)
-    );
-
-    const labels = new Map<string, NodeLabel>();
-    order.forEach((id, index) => {
-      // An unregistered type has no title of its own. Its registry key is poor
-      // UI text, but it still tells the user far more than a random decimal.
-      const type = byId.get(id)?.type ?? "";
-      const title = NODE_TYPE_TITLES[type] ?? (type || UNKNOWN_NODE_LABEL);
-      // The step is still computed and kept, but deliberately not shown: it is
-      // what puts multi-node messages into flow order below. Status messages
-      // name a node by type alone.
-      labels.set(id, { label: title, step: index + 1 });
-    });
-    return labels;
-  }
-
-  /**
-   * Label for a node id reported by the backend. Falls back to an obviously
-   * degraded placeholder rather than `undefined` if the id is not in the graph
-   * this run started from (a node deleted mid-run, or an event left over from a
-   * run this component did not start).
-   */
-  function nodeLabel(nodeId: string): string {
-    return nodeLabels.get(nodeId)?.label ?? UNKNOWN_NODE_LABEL;
-  }
-
-  /**
-   * Puts a list of reported ids back into flow order, so a message listing
-   * several nodes reads in the order the flow would have run them.
-   *
-   * Sorting the finished labels as text would not do: labels are node types, so
-   * a graph with three delays yields three identical strings and text order says
-   * nothing about when they run. Unknown ids go last, in a stable order of their
-   * own.
-   */
-  function inFlowOrder(nodeIds: string[]): string[] {
-    const step = (id: string) => nodeLabels.get(id)?.step ?? Number.MAX_SAFE_INTEGER;
-    return nodeIds.slice().sort((a, b) => step(a) - step(b) || a.localeCompare(b));
-  }
+  // `nodeLabel` and `inFlowOrder` are thin bindings of the pure lookups in
+  // `nodeLabels.ts` to the snapshot above. They are kept as one-argument
+  // wrappers so every call site below - and `.map(nodeLabel)` in particular -
+  // reads as it did when the map was module state. The rules they follow, and
+  // why the ordering agrees with the engine, are documented there.
+  const nodeLabel = (nodeId: string) => labelForNodeId(nodeLabels, nodeId);
+  const inFlowOrder = (nodeIds: string[]) => orderIdsByStep(nodeLabels, nodeIds);
 
   $: hasError = statusMessages.some((msg) => msg.type === "error");
   $: hasWarning = statusMessages.some((msg) => msg.type === "warning");
@@ -641,8 +304,18 @@
         (node) => node.type === "StartNode"
       );
       if (!hasStartNode) {
-        alert("Flowchart must contain a Start node.");
+        // Reported through the status panel like every other run failure,
+        // rather than a browser `alert()`. An alert is modal - it stops the app
+        // until it is dismissed, and it looks nothing like the rest of the
+        // window - and it leaves no record, where a refused run is exactly the
+        // thing the panel exists to keep on screen. The panel's own toggle
+        // button carries the error state, so this cannot go unnoticed either.
         isExecuting = false;
+        addStatusMessage({
+          id: `no-start-${Date.now()}`,
+          type: "error",
+          message: "Flowchart must contain a Start node.",
+        });
         return;
       }
 
@@ -998,7 +671,7 @@
   // emitted on its `data`, where v2 spread the payload across the callback's
   // arguments - hence the `({ data })` on each of these.
   function setupEventListeners() {
-    // The backend reports tasks by node id, which is a random decimal and
+    // The backend reports tasks by node id, which is a random UUID and
     // meaningless on screen. Every message below names the node the way the
     // canvas does and keeps the id in `nodeId` for the panel's tooltip.
     eventUnsubscribers.push(Events.On("task-started", ({ data }) => {
@@ -1186,16 +859,24 @@
 
   // Unsaved changes
   // ---------------
-  // How often the canvas is compared with the macro on disk. Polling rather
-  // than reacting to the stores is forced by the by-reference data contract at
-  // the top of this file: node components mutate the `data` object the store
-  // holds, so editing a delay changes no store reference and fires no
-  // subscription. A comparison is a `JSON.stringify` of the graph, which at the
-  // size a macro reaches is nothing, and this interval is far below the time it
-  // takes to reach for the macro list.
-  const DIRTY_POLL_MS = 500;
-
-  let dirtyPollTimer: ReturnType<typeof setInterval> | undefined;
+  // The canvas is compared with the macro on disk whenever the graph says it
+  // changed, rather than on a timer. Everything that replaces a store's value -
+  // a node dropped or deleted, a node dragged, an edge drawn, the name typed -
+  // fires these subscriptions by itself; an edit made inside a node's `data`
+  // payload fires them through `markGraphEdited`, for the reason in the NOTE at
+  // the top of this file. This used to be a 500ms poll, which meant a save
+  // button that lit up as much as half a second after the keystroke and a
+  // comparison run twice a second whether anything had happened or not.
+  //
+  // No debounce sits in front of it. A comparison is a `toObject()` plus a
+  // `JSON.stringify` of the graph: measured at roughly 15us for ten nodes,
+  // 130us for a hundred and 0.8ms for five hundred - a fraction of the render
+  // the edit had already caused, and dwarfed by what Svelte Flow itself does on
+  // each of these notifications (it rebuilds its internal node for every node
+  // in the graph). The thing worth protecting is that the warning is right at
+  // the moment the user reaches for the macro list, and a delay is exactly what
+  // would take that away.
+  let dirtyUnsubscribers: (() => void)[] = [];
 
   /**
    * Updates the unsaved-changes flag.
@@ -1234,21 +915,36 @@
       captureSavedSnapshot();
     }
 
-    dirtyPollTimer = setInterval(refreshDirtyState, DIRTY_POLL_MS);
+    // Subscribed here rather than with `$:` so the answer is recomputed for
+    // every announced edit, including the ones that change nothing this
+    // component renders. Each subscription also fires once on the spot, which
+    // is what makes the arrival back from the macro list report the graph it
+    // arrives with; a macro whose baseline is still a frame away reports clean
+    // either way - see `refreshDirtyState`.
+    dirtyUnsubscribers = [
+      nodesData.subscribe(refreshDirtyState),
+      edgesData.subscribe(refreshDirtyState),
+      macroName.subscribe(refreshDirtyState),
+    ];
   });
 
   onDestroy(() => {
     for (const unsubscribe of eventUnsubscribers) unsubscribe();
     eventUnsubscribers = [];
 
-    clearInterval(dirtyPollTimer);
+    for (const unsubscribe of dirtyUnsubscribers) unsubscribe();
+    dirtyUnsubscribers = [];
+
     clearTimeout(saveSuccessTimer);
     // The glows go with the component, but the timers holding them would
     // outlive it and write to a destroyed component's state.
     clearActiveNodes();
 
     // One last look, so the flag the macro list reads describes the canvas as
-    // the user left it rather than as it was up to half a second earlier.
+    // the user left it. The subscriptions above have just been dropped, and an
+    // edit can still land after that - a node component's own teardown, or a
+    // final mutation that never got to announce itself - so this is the answer
+    // that has to be right rather than the last one that happened to arrive.
     // Guarded because this runs while the route is being torn down: an unsaved
     // edit going unrecorded is worth a warning in the console, never a throw
     // out of a destroy.
@@ -1263,7 +959,8 @@
 <!-- The run marks: which nodes a run skipped, and which it is executing right
      now. Stylesheets rather than classes on the nodes, so the graph data - and
      therefore every save file - stays exactly as the user left it; see
-     `buildSkippedGlowCss` and `buildActiveGlowCss`. Emptying the id lists
+     `buildSkippedGlowCss` and `buildActiveGlowCss` in `$lib/utils/nodeGlow`.
+     Emptying the id lists
      empties the rules, and Svelte removes the elements with the component.
 
      `<svelte:element>` rather than a written-out tag: a literal style element

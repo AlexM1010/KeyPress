@@ -9,7 +9,7 @@
     import ButtonGroup from './nodeComponents/ButtonGroup.svelte';
     import ButtonGroupItem from './nodeComponents/ButtonGroupItem.svelte';
     import type { ComponentType } from 'svelte';
-    import type { HandleConfig, StartNodeData } from '$lib/stores/flow';
+    import { markGraphEdited, type HandleConfig, type StartNodeData } from '$lib/stores/flow';
     import '$lib/index.scss';
 
     // Type definitions for OS-specific key mappings
@@ -154,6 +154,27 @@
 
     // Reactive declarations
     $: macroDisplay = data.macroKeys.join('+');
+
+    /**
+     * The other half of the by-reference contract: mutating `data` puts the edit
+     * in the store, this announces it. Recording a macro assigns
+     * `data.macroKeys`, which invalidates `data` here and re-runs this - see
+     * `markGraphEdited`.
+     *
+     * Declared last, as it is in every node component: a reactive statement that
+     * writes `data` through a function call is invisible to the compiler, so
+     * source order is all that keeps its write on the announcing side of this
+     * one (see the longer note in `KeyPressNode.svelte`). Anything that comes to
+     * write `data` reactively belongs above this.
+     *
+     * The backfill above is a plain call that assigns nothing, so it does not
+     * fire this. The once-on-init run does, and is harmless: the unsaved-changes
+     * baseline is taken a frame after the nodes mount.
+     */
+    $: {
+        data;
+        markGraphEdited();
+    }
 
     $$restProps
 </script>

@@ -113,6 +113,48 @@ export const nodesData: Writable<FlowNode[]> = writable(defaultNodes);
 export const edgesData: Writable<Edge[]> = writable(defaultEdges);
 
 /**
+ * Announces an edit made *through* a node's `data` payload rather than to the
+ * store that holds it.
+ *
+ * Svelte Flow hands each node component the very `data` object this store holds
+ * and every one of them mutates it in place - that is the by-reference contract
+ * each node component documents, and it is what gets an edit into the store at
+ * all. It is only half of what a subscriber needs, though: an in-place mutation
+ * changes no reference, so nothing subscribed here would ever hear about it.
+ * This is the other half, called by the node components after they mutate, and
+ * it is what the workspace's unsaved-changes check runs off instead of a timer.
+ *
+ * The update is deliberately an *identity* one - the same array, holding the
+ * same node objects. Nothing about the graph's shape has changed and nothing
+ * here should change it; the whole job is to fire the subscriptions. That is
+ * precisely what Svelte Flow's own `updateNodeData` does to publish a change
+ * (`nodes.update((nds) => nds)`), so this is the library's idiom rather than a
+ * trick played on it. Once `<SvelteFlow>` has mounted it literally *is* that
+ * call: the library swaps this store's `set`/`update` for its internal ones so
+ * the two stay in step (see `syncNodeStores` in @xyflow/svelte).
+ *
+ * Announcing more often than strictly necessary is safe by construction, and
+ * that matters because the node palette renders the same components as drag
+ * previews (see `flowpanels/LeftPanel.svelte`) - so a preview, whose payload is
+ * its own and not in this store, announces on mount and whenever it is poked.
+ * Nothing here decides that the macro changed; it only asks the workspace to
+ * look, and the workspace answers by comparing serialisations (see
+ * `serializeMacro`). A notification about nothing costs one comparison and
+ * cannot make a clean macro look dirty.
+ *
+ * `updateNodeData` itself is deliberately not used to do the announcing.
+ * Alongside the notification it builds a *new* payload and assigns it
+ * (`node.data = { ...node.data, ...next }`), which would swap the object out
+ * from under the component bound to it and detach every `bind:` in that
+ * component from the store - the exact hazard the in-place rule exists to
+ * avoid, and the one every node component's `Object.assign` comment warns
+ * about.
+ */
+export function markGraphEdited(): void {
+	nodesData.update((nodes) => nodes);
+}
+
+/**
  * Identity of the macro the workspace currently has open: the display name the
  * user typed, and the id (bare filename) of the file it lives in - "" when this
  * graph has never been saved.
@@ -130,11 +172,13 @@ export const macroID: Writable<string> = writable('');
 /**
  * Whether the macro on screen differs from the one on disk.
  *
- * Driven by the workspace, which is the only place a graph can be edited, and
- * read by anything that is about to cost the user those edits - the macro list
- * before it opens something else over them. It keeps its last value after the
- * workspace unmounts, which is correct: nothing outside the workspace edits the
- * graph, so the answer cannot go stale while the user is elsewhere.
+ * Driven by the workspace, which is the only place a graph can be edited: it
+ * subscribes to the stores above and re-answers the question on every edit they
+ * announce - see `markGraphEdited` for the ones that would otherwise pass
+ * silently. Read by anything that is about to cost the user those edits - the
+ * macro list before it opens something else over them. It keeps its last value
+ * after the workspace unmounts, which is correct: nothing outside the workspace
+ * edits the graph, so the answer cannot go stale while the user is elsewhere.
  */
 export const isMacroDirty: Writable<boolean> = writable(false);
 
@@ -183,10 +227,12 @@ type PersistableEdge = {
  * The macro as a string that changes exactly when the saved file would.
  *
  * Comparing two of these is how the workspace knows whether there is anything
- * to save. Watching the stores instead would not work at all: Svelte Flow hands
- * each node component the very `data` object the store holds and the components
- * mutate it in place, so editing a delay changes no store reference and fires no
- * subscription.
+ * to save, and the store notifications are only what tells it when to look. A
+ * notification cannot answer the question by itself: the components mutate the
+ * `data` object the store holds in place, so what arrives is `markGraphEdited`
+ * saying *something* was edited - never whether the result differs from the
+ * file. Typing a delay back to the value it was saved at announces an edit and
+ * must still leave the macro clean.
  *
  * Only the fields the Go `FlowData` keeps are included, and that is the point
  * rather than an economy: `toObject()` also reports Svelte Flow's own bookkeeping
