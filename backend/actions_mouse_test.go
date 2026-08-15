@@ -33,6 +33,57 @@ func TestNumberInReadsAJSONNumber(t *testing.T) {
 	}
 }
 
+func TestResolvePositionReadsFixedCoordinates(t *testing.T) {
+	pos := map[string]interface{}{
+		"type":        "Fixed",
+		"coordinates": map[string]interface{}{"x": float64(120), "y": float64(240)},
+	}
+
+	// The current cursor is passed but must be ignored for a Fixed position.
+	x, y, ok := resolvePosition(pos, 999, 999)
+	if !ok || x != 120 || y != 240 {
+		t.Fatalf("resolvePosition = %v, %v, %v; want 120, 240, true", x, y, ok)
+	}
+}
+
+func TestResolvePositionTakesTheCursorItIsGiven(t *testing.T) {
+	// The property the ordering in `executeMouseMoveTask` depends on: "Mouse"
+	// resolves against the reading passed in, not against a live one taken here.
+	// Both ends are resolved from a single reading taken before anything moves,
+	// so an end position of "Mouse" means where the cursor was when the task
+	// started - not wherever the move to the start position just put it.
+	x, y, ok := resolvePosition(map[string]interface{}{"type": "Mouse"}, 42, 84)
+	if !ok || x != 42 || y != 84 {
+		t.Fatalf("resolvePosition = %v, %v, %v; want 42, 84, true", x, y, ok)
+	}
+
+	// And it does not need coordinates to do it - a "Mouse" end never has any.
+	if _, _, ok := resolvePosition(map[string]interface{}{"type": "Mouse"}, 0, 0); !ok {
+		t.Fatal("a Mouse position was refused for having no coordinates")
+	}
+}
+
+func TestResolvePositionRefusesCoordinatesItCannotRead(t *testing.T) {
+	for name, pos := range map[string]map[string]interface{}{
+		"no coordinates at all": {"type": "Fixed"},
+		"coordinates of the wrong shape": {
+			"type": "Fixed", "coordinates": "120,240",
+		},
+		"missing y": {
+			"type": "Fixed", "coordinates": map[string]interface{}{"x": float64(120)},
+		},
+		"x as a string": {
+			"type": "Fixed", "coordinates": map[string]interface{}{"x": "120", "y": float64(240)},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, ok := resolvePosition(pos, 0, 0); ok {
+				t.Fatal("accepted a position it cannot have read")
+			}
+		})
+	}
+}
+
 // A payload in the shape the Mouse Move node saves, which each test then
 // damages in one specific way.
 func mouseMovePayload() map[string]interface{} {

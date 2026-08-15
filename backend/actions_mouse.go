@@ -56,6 +56,33 @@ func mouseMoveFailed(task Task, app *App, reason string) {
 	})
 }
 
+// resolvePosition turns one end of a mouse-move node into screen coordinates,
+// reporting false if the node does not carry usable ones.
+//
+// `currentX` / `currentY` are passed in rather than read here, and that is the
+// point: a "Mouse" position means where the cursor was when the task *started*,
+// so both ends have to resolve against one reading taken before anything moves.
+// Reading the live location inside here would make an end-position of "Mouse"
+// mean "wherever the start move just put it", which is a different macro.
+func resolvePosition(pos map[string]interface{}, currentX, currentY int) (float64, float64, bool) {
+	if pos["type"] == "Mouse" {
+		return float64(currentX), float64(currentY), true
+	}
+
+	coords, ok := pos["coordinates"].(map[string]interface{})
+	if !ok {
+		return 0, 0, false
+	}
+
+	x, okX := numberIn(coords, "x")
+	y, okY := numberIn(coords, "y")
+	if !okX || !okY {
+		return 0, 0, false
+	}
+
+	return x, y, true
+}
+
 // mouseMoveSettings is everything a mouse-move node says about *how* to move,
 // as opposed to where.
 type mouseMoveSettings struct {
@@ -142,55 +169,28 @@ func executeMouseMoveTask(task Task, app *App) {
 	// Get current mouse position for 'Mouse' type positions
 	currentX, currentY := robotgo.Location()
 
-	// Resolve start position
-	var startX, startY float64
-	if startPos["type"] == "Mouse" {
-		startX, startY = float64(currentX), float64(currentY)
-	} else {
-		coords, ok := startPos["coordinates"].(map[string]interface{})
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid start coordinates")
-			return
-		}
-		startX, ok = numberIn(coords, "x")
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid start coordinates")
-			return
-		}
-		startY, ok = numberIn(coords, "y")
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid start coordinates")
-			return
-		}
+	// Resolve both ends and read the settings *before* anything moves.
+	//
+	// Nothing below this point can refuse the run, and that ordering is the whole
+	// intent: the move to the start position used to happen between resolving the
+	// two ends, so a node with an unreadable end position or an unreadable speed
+	// reported its error only after it had already yanked the user's cursor
+	// across the screen. A task that is going to fail should not move the mouse
+	// first.
+	startX, startY, ok := resolvePosition(startPos, currentX, currentY)
+	if !ok {
+		mouseMoveFailed(task, app, "Invalid start coordinates")
+		return
 	}
 
-	// Move to start position if not already there
-	robotgo.Move(int(startX), int(startY))
-
-	// Resolve end position
-	var endX, endY float64
-	if endPos["type"] == "Mouse" {
-		endX, endY = float64(currentX), float64(currentY)
-	} else {
-		coords, ok := endPos["coordinates"].(map[string]interface{})
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid end coordinates")
-			return
-		}
-		endX, ok = numberIn(coords, "x")
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid end coordinates")
-			return
-		}
-		endY, ok = numberIn(coords, "y")
-		if !ok {
-			mouseMoveFailed(task, app, "Invalid end coordinates")
-			return
-		}
+	endX, endY, ok := resolvePosition(endPos, currentX, currentY)
+	if !ok {
+		mouseMoveFailed(task, app, "Invalid end coordinates")
+		return
 	}
 
-	// Extract movement settings. Read as one unit so the reading can be tested
-	// without a mouse attached - see `readMouseMoveSettings`.
+	// Read as one unit so the reading can be tested without a mouse attached -
+	// see `readMouseMoveSettings`.
 	settings, reason := readMouseMoveSettings(task.Data)
 	if reason != "" {
 		mouseMoveFailed(task, app, reason)
@@ -202,6 +202,13 @@ func executeMouseMoveTask(task Task, app *App) {
 	variance := settings.variance
 	pathType := settings.pathType
 	dragWhileMoving := settings.dragWhileMoving
+
+	// Move to the start position. Deliberately still ahead of the MouseSleep
+	// assignment below: this is repositioning, not the movement the node
+	// describes, so it runs at the default speed rather than the configured one -
+	// which is what it did when it sat higher up, and is not something the
+	// reordering should quietly change.
+	robotgo.Move(int(startX), int(startY))
 
 	// Calculate final speed with randomization if enabled
 	finalSpeed := speedValue
