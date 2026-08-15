@@ -96,7 +96,7 @@
 	<div class="grid gap-6">
 		<!-- Button Type Selection -->
 		<ButtonGroup variant="default">
-			{#each BUTTON_TYPES as type}
+			{#each BUTTON_TYPES as type (type)}
 				<ButtonGroupItem
 					value={type}
 					on:click={() => handleClick(type)}
@@ -158,7 +158,7 @@
 			{#if showAdvanced}
 				<div class="mt-4 grid gap-6">
 					<ButtonGroup variant="default">
-						{#each SCROLL_DIRECTIONS as direction}
+						{#each SCROLL_DIRECTIONS as direction (direction)}
 							<ButtonGroupItem
 								value={direction}
 								on:click={() => toggleDirection(direction)}

@@ -194,7 +194,7 @@
 		<!-- Special Keys Selection -->
 		<div class="flex flex-col">
 			<ButtonGroup variant="default">
-				{#each specialKeysByOS[currentOS] as specialKey}
+				{#each specialKeysByOS[currentOS] as specialKey (specialKey.key)}
 					<ButtonGroupItem
 						value={specialKey.key}
 						on:click={() => toggleSpecialKey(specialKey.key)}

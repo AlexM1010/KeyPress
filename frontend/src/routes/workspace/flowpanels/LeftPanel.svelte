@@ -152,11 +152,11 @@
 
 <div class="left-panel" class:panel-open={isLeftPanelExpanded}>
 	<div class="panel-spacing">
-		{#each availableNodes as group}
+		{#each availableNodes as group (group.group)}
 			<div class="node-group">
 				<h3 class="text-sm font-medium text-secondary mb-2">{group.group}</h3>
 				<ul class="node-list">
-					{#each group.nodes as node}
+					{#each group.nodes as node (node.id)}
 						<li
 							class="draggable-node"
 							draggable="true"

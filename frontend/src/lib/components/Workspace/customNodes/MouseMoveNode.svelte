@@ -278,7 +278,7 @@
 					<div class="grid gap-4">
 						<h4 class="text-sm font-medium --main-text">Move Speed</h4>
 						<ButtonGroup variant="default">
-							{#each SPEED_TYPES as type}
+							{#each SPEED_TYPES as type (type)}
 								<ButtonGroupItem
 									value={type}
 									on:click={() => (data.speed.type = type)}
@@ -320,7 +320,7 @@
 					<div class="grid gap-4">
 						<h4 class="text-sm font-medium --main-text">Path Type</h4>
 						<ButtonGroup variant="default">
-							{#each PATH_TYPES as type}
+							{#each PATH_TYPES as type (type)}
 								<ButtonGroupItem
 									value={type}
 									on:click={() => (data.pathType = type)}

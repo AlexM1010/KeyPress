@@ -34,7 +34,7 @@
 				? 'pl-10'
 				: 'pl-3'}"
 		>
-			{#each options as opt}
+			{#each options as opt (opt)}
 				<option value={opt}>{opt}</option>
 			{/each}
 		</select>

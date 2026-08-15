@@ -59,7 +59,7 @@
 	<div class="space-y-4">
 		<!-- Delay Type Selection -->
 		<ButtonGroup variant="default">
-			{#each DELAY_TYPES as type}
+			{#each DELAY_TYPES as type (type)}
 				<ButtonGroupItem
 					value={type}
 					on:click={() => updateDelayType(type)}

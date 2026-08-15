@@ -99,7 +99,7 @@
 		</svg>
 	</div>
 
-	{#each handles as handle}
+	{#each handles as handle (handle.id ?? `${handle.type}-${handle.position}`)}
 		<Handle
 			type={handle.type}
 			position={handle.position}
