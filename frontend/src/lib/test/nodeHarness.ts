@@ -1,0 +1,55 @@
+// frontend/src/lib/test/nodeHarness.ts
+import { render } from '@testing-library/svelte';
+import type { ComponentType } from 'svelte';
+import NodeHarness from './NodeHarness.svelte';
+import { serializeMacro } from '$lib/stores/flow';
+
+// Unmounting between tests is handled once for the whole suite, in `setup.ts`.
+
+/**
+ * Renders one custom node the way Svelte Flow would, and hands back the very
+ * `data` object it was given.
+ *
+ * `data` is returned rather than copied because it is the whole point of the
+ * exercise: every node component mutates the payload it is handed in place, and
+ * that by-reference write is how an edit reaches the flow store at all (see
+ * `markGraphEdited`). A test therefore drives a control and then reads *this*
+ * object - if the component had reassigned `data` instead of mutating it, the
+ * store's copy would go stale in exactly the way this returns unchanged.
+ */
+export function renderNode<TData extends Record<string, unknown>>(
+	component: ComponentType,
+	data: TData,
+	props: Record<string, unknown> = {}
+): { data: TData } {
+	render(NodeHarness, {
+		props: {
+			component,
+			props: { id: 'test-node-1', data, ...props }
+		}
+	});
+
+	return { data };
+}
+
+/**
+ * The payload as the saved file would hold it.
+ *
+ * Goes through the real `serializeMacro` rather than `JSON.stringify` on its
+ * own, because that function is what the workspace compares against the file and
+ * so is the only honest answer to "does this edit persist, and as what". It is
+ * also where a type slip surfaces: `bind:value` on an `<input type="number">`
+ * yields a string if the binding is ever routed through a text field, JSON keeps
+ * strings and numbers apart, and the Go side asserts `task.Data["time"].(float64)`
+ * - so a number that became a string fails at run time on the user's real
+ * keyboard, having passed every compile-time check on the way there.
+ */
+export function persistedData(data: unknown, type = 'TestNode'): Record<string, unknown> {
+	const serialized = serializeMacro(
+		'test-macro',
+		[{ id: 'test-node-1', type, position: { x: 0, y: 0 }, data }],
+		[]
+	);
+
+	return JSON.parse(serialized).nodes[0].data;
+}

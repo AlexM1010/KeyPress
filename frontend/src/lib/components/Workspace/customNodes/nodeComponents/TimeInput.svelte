@@ -31,6 +31,17 @@
     };
 
     export let label = '';
+
+    // The DOM id of the number box, tying it to its <label for=...>. It used to
+    // be the hard-coded literal "time-input", so every instance on the page
+    // rendered the same id: the Delay node's Random mode alone puts two of these
+    // in one node, so the document had duplicate ids and *both* labels resolved
+    // to the first box - clicking "Maximum Time" focused the minimum. A fresh
+    // unique value per instance is the same fix Select.svelte and Slider.svelte
+    // already carry; callers that want a stable, predictable id can still pass
+    // one in.
+    export let id: string = `time-input-${crypto.randomUUID()}`;
+
     export let defaultValue = 1;
     export let value = defaultValue * 1000;
     export let highlightColor: string = 'bg-grey-500';
@@ -112,8 +123,8 @@
 
 <div class="flex items-center gap-2">
     {#if label}
-        <label 
-            for="time-input" 
+        <label
+            for={id}
             class="text-sm --main-text"
         >
             {label}
@@ -125,7 +136,7 @@
             type="number"
             value={displayValue}
             on:input={handleInputChange}
-            id="time-input" 
+            {id}
             class="h-8 px-2 text-right
                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent 
                    {isInvalid ? 'border-red-500' : ''} {showArrows ? 'rounded-l-md' : 'rounded-l-lg'}"

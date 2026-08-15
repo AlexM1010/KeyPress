@@ -56,8 +56,12 @@ jobs:
         working-directory: frontend
         run: npm run check
 
-      # Plain-TypeScript unit tests (node environment, no Svelte compilation),
-      # so they need neither the built frontend below nor a browser.
+      # Two suites in one run, split by environment: the plain-TypeScript unit
+      # tests in a node environment, and the component tests in jsdom (each of
+      # those files opts in with a `// @vitest-environment jsdom` docblock - see
+      # vitest.config.ts). Neither needs the frontend built below, and jsdom is a
+      # devDependency so `npm ci` above is all the setup there is - no browser is
+      # downloaded or launched.
       - name: Test frontend
         working-directory: frontend
         run: npm test

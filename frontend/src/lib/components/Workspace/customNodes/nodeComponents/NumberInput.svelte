@@ -3,6 +3,16 @@
     import { ChevronUp, ChevronDown } from 'lucide-svelte';
 
     export let label: string = '';
+
+    // The DOM id of the number box, tying it to its <label for=...>. It used to
+    // be the hard-coded literal "number-input", so every instance on the page
+    // rendered the same id: the Wait For Color node alone puts three of these in
+    // one node, so the document had duplicate ids and *every* label resolved to
+    // the first box - clicking "Tolerance" focused X. A fresh unique value per
+    // instance is the same fix Select.svelte and Slider.svelte already carry;
+    // callers that want a stable, predictable id can still pass one in.
+    export let id: string = `number-input-${crypto.randomUUID()}`;
+
     export let value: number = 0;
     export let minValue: number | null = null;
     export let maxValue: number | null = null;
@@ -75,14 +85,14 @@
 <div class="flex flex-col">
     <div class="flex items-center">
         {#if label}
-            <label for="number-input" class="text-sm --text-main mr-2">{label}</label>
+            <label for={id} class="text-sm --text-main mr-2">{label}</label>
         {/if}
         <div class="flex">
             <input 
                 type="number"
                 bind:value
-                id="number-input" 
-                class="h-8 px-2 text-right 
+                {id}
+                class="h-8 px-2 text-right
                     {isInvalid ? 'input-error' : ''} 
                     {showArrows ? 'rounded-l-md' : 'rounded-md'}"
                 style="width: {inputWidth}"
