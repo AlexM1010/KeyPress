@@ -113,8 +113,14 @@ func emittedEvent(name string) string {
 // newTestApp builds an App with no Wails application, no window and no tray -
 // the state every test runs in - and shuts its worker pool down afterwards so a
 // finished test leaves no workers behind.
+//
+// "Leaves no workers behind" is asserted, not assumed: verifyNoLeaks is
+// registered first so that, Cleanup being last-in-first-out, it runs after the
+// Stop below and fails the test if any goroutine survived it. See main_test.go.
 func newTestApp(t *testing.T) *App {
 	t.Helper()
+
+	verifyNoLeaks(t)
 
 	app := NewApp()
 	t.Cleanup(app.taskQueue.Stop)

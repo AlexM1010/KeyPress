@@ -8,6 +8,7 @@ require (
 	github.com/adrg/xdg v0.5.3
 	github.com/go-vgo/robotgo v0.110.5
 	github.com/wailsapp/wails/v3 v3.0.0-beta.4
+	go.uber.org/goleak v1.3.0
 )
 
 require (
