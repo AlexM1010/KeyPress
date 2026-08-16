@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npx --no-install *)",
+      "Bash(go build*)",
+      "Bash(go test*)",
+      "Bash(go vet*)",
+      "Bash(go doc*)",
+      "Bash(gofmt*)",
+      "Bash(golangci-lint*)",
+      "Bash(govulncheck*)",
+      "Bash(task *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "timeout": 60,
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format.ps1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "timeout": 300,
+            "statusMessage": "Linting what changed",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/lint.ps1"
+          }
+        ]
+      }
+    ]
+  }
+}
