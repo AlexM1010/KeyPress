@@ -11,3 +11,8 @@ export.md
 bin
 .task
 *.syso
+
+# Written by `go test -coverprofile`, which CI runs on every push and uploads
+# as an artifact. Running the same command locally should not leave a file to
+# explain.
+coverage.out

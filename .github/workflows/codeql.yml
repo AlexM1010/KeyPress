@@ -1,0 +1,100 @@
+name: CodeQL
+
+# Not on every branch, unlike main.yml. CodeQL has to build the Go code and
+# then analyse the database it traced out of that build, which is several times
+# the cost of the whole CI gate - too slow to sit in front of every push to a
+# work-in-progress branch. Master and its pull requests catch anything that is
+# about to ship, and the weekly run catches the rest: the query packs are
+# updated continuously, so a commit that was clean in January can be flagged in
+# March without a line of it having changed.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Mondays, 05:23 UTC. Off the hour on purpose - scheduled jobs pile up at
+    # :00 and get queued.
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Go
+    # Same reason main.yml is Windows-only: the code under analysis is a
+    # Windows desktop app. keylayout_windows.go is behind a `//go:build
+    # windows` tag, and a Linux runner would build - and therefore analyse -
+    # keylayout_other.go in its place.
+    runs-on: windows-latest
+
+    permissions:
+      # Uploading the SARIF results to the Security tab needs this; the rest of
+      # the token stays read-only.
+      security-events: write
+      contents: read
+      actions: read
+
+    env:
+      # robotgo reaches the OS input APIs through cgo. Without this the link
+      # fails on undefined symbols, the build step fails, and CodeQL has no
+      # database to analyse. Mirrors main.yml and Taskfile.yml.
+      CGO_ENABLED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # main.go does `//go:embed all:frontend/build`, and frontend/build is
+      # gitignored, so `go build ./...` on a fresh checkout fails with
+      # "pattern all:frontend/build: no matching files found" before it
+      # compiles a single package - and CodeQL would then have an empty
+      # database rather than a failure it can explain. Everything above this
+      # line exists to get the embed directory on disk, and none of it touches
+      # the Go toolchain, which is why it can sit ahead of the init step.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # init has to come immediately before the build it is meant to observe:
+      # in manual build mode it installs the compiler tracer into the
+      # environment of the following steps, and only the Go compiled after this
+      # point ends up in the database.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          build-mode: manual
+
+      # ./... rather than the production build main.yml runs: the analysis
+      # wants every package traced, including backend's, and -ldflags/-trimpath
+      # only affect the artifact, which is thrown away here.
+      - name: Build Go
+        run: go build ./...
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:go'

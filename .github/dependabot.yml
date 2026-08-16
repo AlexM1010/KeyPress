@@ -1,0 +1,52 @@
+# Three ecosystems, because this repo is three dependency trees: the Go module
+# at the root, the SvelteKit app under frontend/, and the actions pinned in
+# .github/workflows/.
+#
+# Everything is grouped or ignored to keep the volume sane - ungrouped, the npm
+# tree alone is enough to open a dozen pull requests a week, and a gate that
+# nobody reads is a gate that gets rubber-stamped.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # Wails v3 is a beta line - v3.0.0-beta.4 today - and the API moves
+      # between betas: Events.On's payload shape and the generated binding
+      # types have both changed under us already. A bumped beta is a porting
+      # job, not a dependency update, so it is done by hand and read against
+      # the module source. Every other Go dependency is fair game.
+      - dependency-name: github.com/wailsapp/wails/v3
+    groups:
+      # robotgo alone drags in around twenty transitive modules, and they move
+      # together. One pull request, one CI run.
+      go-modules:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Vite, Vitest, ESLint, Prettier, svelte-check and the adapters: tooling
+      # that never reaches the shipped bundle, so the whole batch is either
+      # green or red on one CI run and there is nothing to bisect.
+      dev-dependencies:
+        dependency-type: development
+        patterns: ['*']
+    # Runtime dependencies are left ungrouped on purpose. There are few of
+    # them, @xyflow/svelte is the one the whole workspace is built on, and a
+    # bump there deserves its own pull request to look at.
+
+  - package-ecosystem: github-actions
+    # `/` for this ecosystem means .github/workflows, not the repo root.
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

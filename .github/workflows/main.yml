@@ -92,6 +92,27 @@ jobs:
         working-directory: frontend
         run: npm test
 
+      # The two cheapest Go checks there are, and the only ones that run on a
+      # bare checkout: neither loads package main, so neither trips the embed
+      # error described below. That is why they sit above the frontend build
+      # rather than down in the Go block - seconds of signal ahead of a minute
+      # of bundling. Separate steps, not two lines of one: a multi-line run: on
+      # Windows is pwsh, where only the *last* command's exit code reaches the
+      # runner and a failure above it is swallowed.
+      #
+      # tidy -diff prints what `go mod tidy` would rewrite and exits non-zero if
+      # there is anything, without touching the files - so a stale require or a
+      # dropped go.sum line fails here instead of surfacing as a confusing build
+      # error later.
+      - name: Check go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
+      # Rehashes every module in the download cache against go.sum. Cheap
+      # supply-chain check: it catches a dependency whose contents no longer
+      # match what this repo recorded.
+      - name: Verify module checksums
+        run: go mod verify
+
       # main.go does `//go:embed all:frontend/build`, and frontend/build is
       # gitignored - so on a fresh checkout every Go command that loads package
       # main (vet, build) fails until the frontend has been built. This step
@@ -105,15 +126,43 @@ jobs:
 
       # Installed from source rather than via the action, which pins its own
       # Go toolchain and would build the linter against a different one than
-      # go.mod asks for. Loads package main, so it belongs after the frontend
-      # build like vet above.
-      - name: Lint Go
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-          golangci-lint run ./...
+      # go.mod asks for. The two steps below share this one binary.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
+      # `run` does not check formatting in v2. The formatters - gofmt and
+      # goimports, both enabled in .golangci.yml - execute only under the `fmt`
+      # subcommand, so unformatted Go sails straight past the linter: a function
+      # declared `func probeFmtGap( )` is reported by `run` as unused and
+      # nothing else. --diff prints the rewrite instead of applying it and exits
+      # 1 when there is one, which is what fails this step.
+      #
+      # Its own step rather than a second line under "Lint Go", for the pwsh
+      # exit-code reason given above; ahead of it because parsing is cheaper
+      # than the type-checking `run` does. .gitattributes pins *.go to eol=lf,
+      # so a Windows checkout does not come back with every file "unformatted".
+      - name: Check Go formatting
+        run: golangci-lint fmt --diff ./...
+
+      # Loads package main, so it belongs after the frontend build like vet
+      # above.
+      - name: Lint Go
+        run: golangci-lint run ./...
+
+      # -coverprofile rides along on the race run rather than adding a second
+      # pass: instrumentation costs a little, running the whole suite twice
+      # costs a lot. -race already forces the atomic count mode, so the profile
+      # is accurate without asking for -covermode. No threshold is enforced -
+      # the point is only to make the number visible, in the log below and as an
+      # artifact at the end.
       - name: Go test
-        run: go test -race ./backend/...
+        run: go test -race -coverprofile=coverage.out ./backend/...
+
+      # Per-function table plus a `total:` line, so the number is readable in
+      # the log without downloading anything. Separate from the step above so
+      # that its exit code cannot mask a failing test run.
+      - name: Report Go coverage
+        run: go tool cover -func=coverage.out
 
       # Reports only vulnerabilities this code can actually reach, by call
       # graph, rather than every advisory touching the dependency tree - which
@@ -121,10 +170,15 @@ jobs:
       # twenty transitive modules nobody here chose. Needs network access to
       # vuln.go.dev, and `frontend/build` from the step above, since it loads
       # package main like vet does.
+      # Two steps rather than two lines of one, for the pwsh exit-code reason
+      # given above the tidy check: this one only gated correctly by accident,
+      # because govulncheck happened to be last and a failing `go install` would
+      # have been swallowed.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
       - name: Check for vulnerable dependencies
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        run: govulncheck ./...
 
       # Compiles what `task build` (build/windows/Taskfile.yml -> build:native)
       # compiles, with the same flags, but without going through the wails3
@@ -141,4 +195,16 @@ jobs:
         with:
           name: Keypress-windows-amd64
           path: bin/Keypress.exe
+          if-no-files-found: error
+
+      # Kept next to the binary upload rather than immediately after the test
+      # step: uploads are the slow, networked part of the run, and a run that
+      # fails before here has a reason to look at that is not the coverage
+      # number. Deliberately a raw profile and no third-party uploader - open it
+      # with `go tool cover -html=coverage.out`.
+      - name: Upload Go coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
           if-no-files-found: error
