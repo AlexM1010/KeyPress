@@ -16,8 +16,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"coverage": "vitest run --coverage",
-		"lint": "eslint .",
-		"lint:fix": "eslint . --fix",
+		"lint": "svelte-kit sync && eslint .",
+		"lint:fix": "svelte-kit sync && eslint . --fix",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."
 	},
