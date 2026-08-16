@@ -149,6 +149,13 @@ jobs:
       - name: Lint Go
         run: golangci-lint run ./...
 
+      # The quotes around -coverprofile are load-bearing. `run:` is pwsh here,
+      # and it splits an unquoted `-coverprofile=coverage.out` at the dot: go
+      # receives `-coverprofile=coverage` and a second argument `.out`, treats
+      # that as a package path, and fails the step with "FAIL .out [setup
+      # failed]" *after* every test has passed. The same applies to
+      # `go tool cover -func=` below.
+      #
       # -coverprofile rides along on the race run rather than adding a second
       # pass: instrumentation costs a little, running the whole suite twice
       # costs a lot. -race already forces the atomic count mode, so the profile
@@ -156,13 +163,13 @@ jobs:
       # the point is only to make the number visible, in the log below and as an
       # artifact at the end.
       - name: Go test
-        run: go test -race -coverprofile=coverage.out ./backend/...
+        run: go test -race "-coverprofile=coverage.out" ./backend/...
 
       # Per-function table plus a `total:` line, so the number is readable in
       # the log without downloading anything. Separate from the step above so
       # that its exit code cannot mask a failing test run.
       - name: Report Go coverage
-        run: go tool cover -func=coverage.out
+        run: go tool cover "-func=coverage.out"
 
       # Reports only vulnerabilities this code can actually reach, by call
       # graph, rather than every advisory touching the dependency tree - which
