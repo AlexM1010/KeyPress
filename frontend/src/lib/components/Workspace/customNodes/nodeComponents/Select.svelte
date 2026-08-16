@@ -2,35 +2,50 @@
 <script lang="ts">
 	import type { ComponentType } from 'svelte';
 
-	export let label: string;
-	export let options: string[];
-	export let icon: ComponentType | null = null;
-	export let value: string = '';
+	type Props = {
+		label: string;
+		options: string[];
+		icon?: ComponentType | null;
+		value?: string;
+		id?: string;
+	};
 
-	// The DOM id of the <select>, tying it to its <label for=...>. It used to be
-	// the hard-coded literal "select-input", so every instance on the page
-	// rendered the same id: with two Selects in one node the document had
-	// duplicate ids and *both* labels resolved to the first control, so clicking
-	// the second label focused the wrong one. Defaulting to a fresh unique value
-	// per instance (the same approach Slider.svelte already takes) keeps the
-	// label/control pairing correct however many are on screen, while callers
-	// that need a stable, predictable id can still pass one in.
-	export let id: string = `select-${crypto.randomUUID()}`;
+	let {
+		label,
+		options,
+		// Destructured under a capitalised name so it can be rendered as `<Icon />`
+		// directly, the way NodeWrapper already renders its own icon prop. That
+		// retires the `<svelte:component>` this used to need - in Svelte 5 any
+		// capitalised variable holding a component is renderable as a tag.
+		icon: Icon = null,
+		// `$bindable` because KeyPressNode binds it (`bind:value={data.namedKey}`);
+		// that binding is how a chosen key reaches the node's payload.
+		value = $bindable(''),
+		// The DOM id of the <select>, tying it to its <label for=...>. It used to be
+		// the hard-coded literal "select-input", so every instance on the page
+		// rendered the same id: with two Selects in one node the document had
+		// duplicate ids and *both* labels resolved to the first control, so clicking
+		// the second label focused the wrong one. Defaulting to a fresh unique value
+		// per instance (the same approach Slider.svelte already takes) keeps the
+		// label/control pairing correct however many are on screen, while callers
+		// that need a stable, predictable id can still pass one in.
+		id = `select-${crypto.randomUUID()}`
+	}: Props = $props();
 </script>
 
 <div class="space-y-1.5">
 	<label for={id} class="block text-xs font-medium --main-text">{label}</label>
 	<div class="relative">
-		{#if icon}
+		{#if Icon}
 			<div class="absolute left-3 top-1/2 transform -translate-y-1/2 --main-text">
-				<svelte:component this={icon} class="w-4 h-4" />
+				<Icon class="w-4 h-4" />
 			</div>
 		{/if}
 		<!-- The left padding only clears an icon when there is one to clear. -->
 		<select
 			{id}
 			bind:value
-			class="select-input w-full pr-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 {icon
+			class="select-input w-full pr-3 py-2 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 {Icon
 				? 'pl-10'
 				: 'pl-3'}"
 		>

@@ -1,6 +1,7 @@
 <!-- frontend\src\lib\components\customNodes\TimeInput.svelte -->
 <script lang="ts">
 	import { ChevronUp, ChevronDown } from 'lucide-svelte';
+	import { untrack } from 'svelte';
 	import '$lib/index.scss';
 
 	type TimeUnit = 'ms' | 's' | 'min';
@@ -30,46 +31,74 @@
 		min: 'minutes'
 	};
 
-	export let label = '';
+	type Props = {
+		label?: string;
+		id?: string;
+		defaultValue?: number;
+		value?: number;
+		highlightColor?: string;
+		startingUnit?: TimeUnit;
+		showArrows?: boolean;
+		/** Arrow step override, in milliseconds. Defaults to STEP_MS for the current unit. */
+		step?: number | null;
+		minValue?: number | null;
+		maxValue?: number | null;
+	};
 
-	// The DOM id of the number box, tying it to its <label for=...>. It used to
-	// be the hard-coded literal "time-input", so every instance on the page
-	// rendered the same id: the Delay node's Random mode alone puts two of these
-	// in one node, so the document had duplicate ids and *both* labels resolved
-	// to the first box - clicking "Maximum Time" focused the minimum. A fresh
-	// unique value per instance is the same fix Select.svelte and Slider.svelte
-	// already carry; callers that want a stable, predictable id can still pass
-	// one in.
-	export let id: string = `time-input-${crypto.randomUUID()}`;
+	let {
+		label = '',
+		// The DOM id of the number box, tying it to its <label for=...>. It used to
+		// be the hard-coded literal "time-input", so every instance on the page
+		// rendered the same id: the Delay node's Random mode alone puts two of these
+		// in one node, so the document had duplicate ids and *both* labels resolved
+		// to the first box - clicking "Maximum Time" focused the minimum. A fresh
+		// unique value per instance is the same fix Select.svelte and Slider.svelte
+		// already carry; callers that want a stable, predictable id can still pass
+		// one in.
+		id = `time-input-${crypto.randomUUID()}`,
+		// Destructured before `value`, because `value`'s fallback is written in
+		// terms of it - exactly as the two `export let`s were ordered before.
+		defaultValue = 1,
+		// `$bindable` because every caller binds it to a field of the node's `data`
+		// payload, and the box writes back: typing, stepping and switching unit all
+		// assign `value`, always in milliseconds whatever the box is showing.
+		value = $bindable(defaultValue * 1000),
+		highlightColor = 'bg-grey-500',
+		startingUnit = 's',
+		showArrows = true,
+		step = null,
+		minValue = null,
+		maxValue = null
+	}: Props = $props();
 
-	export let defaultValue = 1;
-	export let value = defaultValue * 1000;
-	export let highlightColor: string = 'bg-grey-500';
-	export let startingUnit: TimeUnit = 's';
-	let unit: TimeUnit = startingUnit;
-
-	export let showArrows: boolean = true;
-	/** Arrow step override, in milliseconds. Defaults to STEP_MS for the current unit. */
-	export let step: number | null = null;
-	$: stepMs = step ?? STEP_MS[unit];
-	export let minValue: number | null = null;
-	export let maxValue: number | null = null;
+	// Seeded from the prop and thereafter owned by this component - the unit
+	// button changes it and nothing outside can. Reading the prop once is what
+	// `let unit = startingUnit` did too: a later change to `startingUnit` did not
+	// move a box the user had already switched, and still does not.
+	//
+	// `untrack` is how that gets said out loud. Reading a prop straight into
+	// `$state` is the shape of a common mistake - someone expecting the state to
+	// follow the prop - so the compiler warns on it (`state_referenced_locally`).
+	// Here the one-shot read is the intent, and untracking it both states that
+	// and clears the warning.
+	let unit: TimeUnit = $state(untrack(() => startingUnit));
 
 	const UNITS: TimeUnit[] = ['ms', 's', 'min'];
-	let significantDigits = 2;
+	let significantDigits = $state(2);
 
-	let displayValue: number;
-	let inputWidth: string;
-	let isInvalid: boolean;
+	// All five of these were `$:` statements and are plain derivations - each
+	// computes a value from props and state and writes nothing back - so they
+	// convert to `$derived` rather than to effects.
+	const stepMs = $derived(step ?? STEP_MS[unit]);
 
-	$: nextUnit = UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length];
+	const nextUnit = $derived(UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length]);
 
-	$: {
+	const displayValue = $derived.by(() => {
 		const conversionFactor = TO_MS[unit];
 		const converted = value / conversionFactor;
 		const precision = significantDigits > 0 ? significantDigits : 2;
-		displayValue = Number(converted.toFixed(precision));
-	}
+		return Number(converted.toFixed(precision));
+	});
 
 	function handleInputChange(event: Event) {
 		const input = event.target as HTMLInputElement;
@@ -114,9 +143,9 @@
 		}
 	}
 
-	$: inputWidth = `${Math.max(String(displayValue).length * 0.6 + 1.2, 3)}em`;
+	const inputWidth = $derived(`${Math.max(String(displayValue).length * 0.6 + 1.2, 3)}em`);
 
-	$: isInvalid = maxValue !== null && displayValue > maxValue;
+	const isInvalid = $derived(maxValue !== null && displayValue > maxValue);
 
 	//TODO: reduce spacing at start of input field
 </script>
@@ -132,7 +161,7 @@
 		<input
 			type="number"
 			value={displayValue}
-			on:input={handleInputChange}
+			oninput={handleInputChange}
 			{id}
 			class="h-8 px-2 text-right
                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -146,10 +175,10 @@
 
 		{#if showArrows}
 			<div class="flex flex-col">
-				<button on:click={increment} class="arrow-button" aria-label="Increment">
+				<button onclick={increment} class="arrow-button" aria-label="Increment">
 					<ChevronUp size={14} />
 				</button>
-				<button on:click={decrement} class="arrow-button" aria-label="Decrement">
+				<button onclick={decrement} class="arrow-button" aria-label="Decrement">
 					<ChevronDown size={14} />
 				</button>
 			</div>
@@ -157,7 +186,7 @@
 
 		<button
 			type="button"
-			on:click={handleUnitChange}
+			onclick={handleUnitChange}
 			class="h-8 px-2 {highlightColor} text-white w-[40px] text-center
                    relative group hover:{highlightColor} focus:outline-none
                    focus:ring-2 focus:ring-blue-500 focus:ring-offset-2

@@ -1,10 +1,30 @@
 <script lang="ts">
-	export let label: string;
-	export let checked: boolean = false;
-	export let disabled: boolean = false;
-	export let highlightColor: string = 'bg-gray-500';
-	export let id = crypto.randomUUID();
 	import '$lib/index.scss';
+
+	type Props = {
+		label: string;
+		checked?: boolean;
+		disabled?: boolean;
+		highlightColor?: string;
+		id?: string;
+	};
+
+	let {
+		// `$bindable` because every caller binds this: the three node components
+		// that render a Checkbox pass `bind:checked={data.something}`, and that
+		// binding is how a tick reaches the node's payload and so the graph.
+		// `export let` was implicitly bindable; a runes prop is not unless it says
+		// so, and a `bind:` against a plain prop throws `bind_not_bindable` at run
+		// time rather than failing to compile.
+		checked = $bindable(false),
+		label,
+		disabled = false,
+		highlightColor = 'bg-gray-500',
+		// Evaluated per instance, exactly as the `export let` default was: several
+		// checkboxes share a node, and a shared id would have every <label for=...>
+		// resolve to the first box.
+		id = crypto.randomUUID()
+	}: Props = $props();
 </script>
 
 <div class="checkbox-container select-none">

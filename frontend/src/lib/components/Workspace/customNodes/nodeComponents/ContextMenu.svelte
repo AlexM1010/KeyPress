@@ -5,20 +5,28 @@
 	// Callback props rather than createEventDispatcher.
 	//
 	// Component events are removed in Svelte 5, and callback props are their
-	// replacement - but they already work in Svelte 4, so this crosses that
-	// break now rather than during the migration. Nothing else about the
-	// component changes: NodeWrapper passes the same two functions it used to
-	// hand to `on:duplicate` / `on:delete`.
-	export let onDuplicate: () => void;
-	export let onDelete: () => void;
+	// replacement - but they already work in Svelte 4, so this crossed that
+	// break before the file itself moved to runes. Nothing about the component's
+	// interface changes here either: NodeWrapper passes the same two functions
+	// it used to hand to `on:duplicate` / `on:delete`.
+	type Props = {
+		onDuplicate: () => void;
+		onDelete: () => void;
+	};
+
+	let { onDuplicate, onDelete }: Props = $props();
+
+	// `$theme` stays as it is. Runes mode does not retire the `$store` prefix -
+	// stores remain readable that way - and `theme` is a real Svelte `readable`
+	// exported from a `.svelte.ts` module, so there is nothing here to convert.
 </script>
 
 <div class={`context-menu ${$theme ? 'dark' : ''}`}>
 	<div class="button-container">
-		<button on:click={onDuplicate} aria-label="Duplicate" class="icon-button">
+		<button onclick={onDuplicate} aria-label="Duplicate" class="icon-button">
 			<Copy class="icon" />
 		</button>
-		<button on:click={onDelete} aria-label="Delete" class="icon-button">
+		<button onclick={onDelete} aria-label="Delete" class="icon-button">
 			<Trash2 class="icon" />
 		</button>
 	</div>
