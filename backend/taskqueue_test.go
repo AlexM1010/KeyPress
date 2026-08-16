@@ -10,7 +10,18 @@
 // drive the real mouse and keyboard. Completions are observed on app.notifyCh,
 // which is where a worker reports a finished task - no logs or events needed.
 //
-// Shared helpers (waitFor, captureLogs, newTestApp) live in execution_test.go.
+// Shared helpers (waitFor, captureLogs, newTestApp, newBubbleTestApp) live in
+// execution_test.go.
+//
+// Three tests here run inside a testing/synctest bubble, and each says at its
+// own doc comment why. The common thread: they are the tests whose claim is
+// that something did *not* happen - Enqueue did not return, no task ran - and
+// outside a bubble that can only be approximated by sleeping for a while and
+// taking the silence as proof. Inside one, synctest.Wait blocks until every
+// other goroutine is durably blocked, which turns "not yet" into "not at all"
+// and costs no real time. The tests that hammer the Enqueue/Stop race are
+// deliberately *not* bubbled: they want the scheduler and the race detector,
+// and a bubble would serialise away the interleaving they exist to provoke.
 
 package backend
 
@@ -18,6 +29,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -56,15 +68,24 @@ func awaitCompletion(t *testing.T, app *App, taskID string) {
 	}
 }
 
-// refuseCompletion fails if any task is reported done within a short window. It
-// is how a test says "nothing ran", which can only ever be a bounded wait.
+// refuseCompletion fails if any task is reported done. It is how a test says
+// "nothing ran".
+//
+// Only callable from inside a synctest bubble, and that is the point. Outside
+// one this could only ever be a bounded wait - it used to sleep 100ms and hope
+// - which proves nothing more than that no task ran *yet*. synctest.Wait
+// returns once every other goroutine in the bubble is durably blocked, so a
+// task that was going to run has run by the time the channel is checked, and
+// an empty channel means nothing ran at all rather than nothing ran in time.
 func refuseCompletion(t *testing.T, app *App) {
 	t.Helper()
+
+	synctest.Wait()
 
 	select {
 	case got := <-app.notifyCh:
 		t.Fatalf("task %q was processed, want nothing to run", got)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 }
 
@@ -189,40 +210,54 @@ func TestTaskQueueCanBeStartedAgainAfterBeingStopped(t *testing.T) {
 // because it is the only task type that blocks for a knowable time without
 // touching the mouse, and it watches the generation's context - so Stop's
 // cancel ends the wait rather than this test sitting through a minute of it.
+//
+// In a synctest bubble, because "is the task genuinely running yet" is a
+// question about quiescence and nothing else. The old version polled the log
+// every millisecond until the task announced itself, which is a guess dressed
+// up as a wait; synctest.Wait answers it exactly. The minute-long delay is
+// bubbled too, so waitInterruptible's timer is on the fake clock and cannot
+// contribute a single millisecond of real time even if the cancel were to
+// regress.
 func TestTaskQueueStopWaitsForTheTaskInFlight(t *testing.T) {
-	app := newTestApp(t)
+	verifyNoLeaks(t)
 	logs := captureLogs(t)
-	queue := app.taskQueue
 
-	queue.Start(unlimitedWorkers)
-	queue.Enqueue(currentGeneration(queue), Task{
-		ID:   "in-flight",
-		Type: "DelayNode",
-		Data: map[string]interface{}{"delayType": "Fixed", "time": float64(60000)},
+	synctest.Test(t, func(t *testing.T) {
+		app := newBubbleTestApp(t)
+		queue := app.taskQueue
+
+		queue.Start(unlimitedWorkers)
+		queue.Enqueue(currentGeneration(queue), Task{
+			ID:   "in-flight",
+			Type: "DelayNode",
+			Data: map[string]interface{}{"delayType": "Fixed", "time": float64(60000)},
+		})
+
+		// Wait until it is genuinely running. Without this, Stop could win the
+		// race to the channel and the assertion below would pass without ever
+		// having tested anything. Once the bubble is quiescent the only thing
+		// the task can be doing is sitting in its delay.
+		synctest.Wait()
+		if got := logs.count("Processing task in-flight"); got != 1 {
+			t.Fatalf("the delay task never started:\n%s", logs)
+		}
+
+		queue.Stop()
+
+		// executeTask logs this from a defer, so it is written whether the task
+		// ran to completion or was cut short by the cancel - which is what makes
+		// it the right signal. The completion on notifyCh is not:
+		// notifyTaskCompletion drops it when the context is already cancelled,
+		// so whether it arrives depends on whether the task beat Stop to it, and
+		// asserting on it made this test fail about one run in three.
+		if got := logs.count("Completed execution of task ID: in-flight"); got != 1 {
+			t.Errorf("Stop returned while its task was still running:\n%s", logs)
+		}
+
+		if got := logs.count("Dispatcher stopping: context canceled"); got != 1 {
+			t.Errorf("%d dispatchers exited, want 1:\n%s", got, logs)
+		}
 	})
-
-	// Wait until it is genuinely running. Without this, Stop could win the race
-	// to the channel and the assertion below would pass without ever having
-	// tested anything.
-	waitFor(t, testTimeout, "the delay task to start", func() bool {
-		return logs.count("Processing task in-flight") == 1
-	})
-
-	queue.Stop()
-
-	// executeTask logs this from a defer, so it is written whether the task ran
-	// to completion or was cut short by the cancel - which is what makes it the
-	// right signal. The completion on notifyCh is not: notifyTaskCompletion
-	// drops it when the context is already cancelled, so whether it arrives
-	// depends on whether the task beat Stop to it, and asserting on it made this
-	// test fail about one run in three.
-	if got := logs.count("Completed execution of task ID: in-flight"); got != 1 {
-		t.Errorf("Stop returned while its task was still running:\n%s", logs)
-	}
-
-	if got := logs.count("Dispatcher stopping: context canceled"); got != 1 {
-		t.Errorf("%d dispatchers exited, want 1:\n%s", got, logs)
-	}
 }
 
 func TestTaskQueueStopOnAQueueThatWasNeverStartedIsSafe(t *testing.T) {
@@ -259,34 +294,47 @@ func TestTaskQueueStopOnAQueueThatWasNeverStartedIsSafe(t *testing.T) {
 // asked for, arriving after they pressed stop. The caller that gets here for
 // real is handleCompletions, which is not covered by Stop's wait for its
 // workers.
+//
+// In a synctest bubble, because both halves of the claim are about something
+// *not* happening and a bubble is the only way to say that without picking a
+// number. "Enqueue did not block" becomes: once the bubble is quiescent the
+// enqueuer has either finished or is durably parked, and finding it finished
+// settles it - no five second deadline that a slow machine could exceed
+// legitimately. "Nothing ran" becomes the same kind of statement, and stops
+// costing the suite the 100ms it used to sleep to make it.
 func TestEnqueueAfterStopReturnsWithoutRunningAnything(t *testing.T) {
-	app := newTestApp(t)
-	queue := app.taskQueue
+	verifyNoLeaks(t)
 
-	queue.Start(unlimitedWorkers)
-	queue.Stop()
+	synctest.Test(t, func(t *testing.T) {
+		app := newBubbleTestApp(t)
+		queue := app.taskQueue
 
-	enqueued := make(chan struct{})
-	go func() {
-		for i := 0; i < 5; i++ {
-			queue.Enqueue(currentGeneration(queue), inertTask(fmt.Sprintf("orphan-%d", i)))
+		queue.Start(unlimitedWorkers)
+		queue.Stop()
+
+		enqueued := make(chan struct{})
+		go func() {
+			for i := 0; i < 5; i++ {
+				queue.Enqueue(currentGeneration(queue), inertTask(fmt.Sprintf("orphan-%d", i)))
+			}
+			close(enqueued)
+		}()
+
+		synctest.Wait()
+		select {
+		case <-enqueued:
+		default:
+			t.Fatal("Enqueue on a stopped queue blocked")
 		}
-		close(enqueued)
-	}()
 
-	select {
-	case <-enqueued:
-	case <-time.After(testTimeout):
-		t.Fatalf("Enqueue on a stopped queue blocked for %s", testTimeout)
-	}
+		refuseCompletion(t, app)
 
-	refuseCompletion(t, app)
-
-	// One worker, so the orphans - buffered ahead of the sentinel if they were
-	// accepted at all - would have to be executed before it.
-	queue.Start(1)
-	queue.Enqueue(currentGeneration(queue), inertTask("the-next-run"))
-	expectNextCompletion(t, app, "the-next-run")
+		// One worker, so the orphans - buffered ahead of the sentinel if they
+		// were accepted at all - would have to be executed before it.
+		queue.Start(1)
+		queue.Enqueue(currentGeneration(queue), inertTask("the-next-run"))
+		expectNextCompletion(t, app, "the-next-run")
+	})
 }
 
 // A straggler from a run that is over must not be executed by the run that
@@ -420,34 +468,48 @@ func TestEnqueueRacingStopDoesNotLeakIntoTheNextGeneration(t *testing.T) {
 // Enqueue blocks while the queue is full, and stopping the queue is what gets
 // it moving again. A caller parked on a full buffer must not be left there by a
 // shutdown.
+//
+// In a synctest bubble, because "it is still blocked" was the one assertion
+// here that a sleep could only approximate: the old version waited 50ms and
+// took Enqueue's silence as proof, which is both slow and weaker than it looks
+// - an Enqueue that returned at 51ms would have passed. synctest.Wait waits
+// until every other goroutine in the bubble is durably blocked, so the
+// enqueuer being parked at that moment is a fact about the program rather than
+// about how long the test was willing to wait.
 func TestEnqueueOnAFullQueueUnblocksWhenTheQueueStops(t *testing.T) {
-	app := newTestApp(t)
-	// One slot and no workers, so the second task has nowhere to go.
-	queue := NewTaskQueue(app, 1)
-	queue.Start(0)
-	t.Cleanup(queue.Stop)
+	verifyNoLeaks(t)
 
-	queue.Enqueue(currentGeneration(queue), inertTask("fills-the-buffer"))
+	synctest.Test(t, func(t *testing.T) {
+		app := newBubbleTestApp(t)
+		// One slot and no workers, so the second task has nowhere to go.
+		queue := NewTaskQueue(app, 1)
+		queue.Start(0)
+		t.Cleanup(queue.Stop)
 
-	blocked := make(chan struct{})
-	go func() {
-		queue.Enqueue(currentGeneration(queue), inertTask("has-to-wait"))
-		close(blocked)
-	}()
+		queue.Enqueue(currentGeneration(queue), inertTask("fills-the-buffer"))
 
-	select {
-	case <-blocked:
-		t.Fatal("Enqueue returned although the queue was full")
-	case <-time.After(50 * time.Millisecond):
-	}
+		blocked := make(chan struct{})
+		go func() {
+			queue.Enqueue(currentGeneration(queue), inertTask("has-to-wait"))
+			close(blocked)
+		}()
 
-	queue.Stop()
+		synctest.Wait()
+		select {
+		case <-blocked:
+			t.Fatal("Enqueue returned although the queue was full")
+		default:
+		}
 
-	select {
-	case <-blocked:
-	case <-time.After(testTimeout):
-		t.Fatalf("Enqueue was still parked on the full queue %s after Stop", testTimeout)
-	}
+		queue.Stop()
+
+		synctest.Wait()
+		select {
+		case <-blocked:
+		default:
+			t.Fatal("Enqueue was still parked on the full queue after Stop")
+		}
+	})
 }
 
 // Context is documented as the handle on one particular generation: captured

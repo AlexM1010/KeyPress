@@ -127,6 +127,34 @@ func newTestApp(t *testing.T) *App {
 	return app
 }
 
+// newBubbleTestApp is newTestApp for a test running inside a synctest bubble.
+// It takes the bubble's *testing.T, so the Stop below is registered on it and
+// runs while the bubble is still up.
+//
+// Two things differ from newTestApp, and both are forced by how synctest
+// decides a goroutine is durably blocked.
+//
+// The App has to be built *inside* the bubble. NewApp creates the queue's
+// context and its task channel, and only channels created within the bubble
+// count towards durable blocking; with an App built outside it, the
+// dispatcher's select on them is an ordinary block the fake clock cannot see,
+// and synctest.Wait never returns. NewApp starts no goroutines, so building it
+// here costs nothing.
+//
+// And the leak check stays on the *outer* t, which is why this does not call
+// verifyNoLeaks and every caller does. goleak run from inside the bubble sees
+// synctest's own machinery - the goroutine parked in synctest.Run and the one
+// running the bubbled test - and reports them as leaks. On the outer t it runs
+// after the bubble has been torn down, which is the state worth asserting
+// about anyway.
+func newBubbleTestApp(t *testing.T) *App {
+	t.Helper()
+
+	app := NewApp()
+	t.Cleanup(app.taskQueue.Stop)
+	return app
+}
+
 // inertFlow builds a flowchart from node ids and the edges between them. Every
 // node is a StartNode; see the file comment for why.
 func inertFlow(nodeIDs []string, edges [][2]string) FlowData {
