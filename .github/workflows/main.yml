@@ -55,7 +55,11 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Matches local development, and clears the floor in frontend's
+          # `engines`. That floor sits *inside* the 20.x range (ESLint 10 wants
+          # ^20.19.0), so pinning the bare major '20' left CI depending on
+          # setup-node happening to resolve a late enough 20.x.
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -101,6 +105,17 @@ jobs:
 
       - name: Go test
         run: go test -race ./backend/...
+
+      # Reports only vulnerabilities this code can actually reach, by call
+      # graph, rather than every advisory touching the dependency tree - which
+      # is what makes it quiet enough to gate on. robotgo alone pulls in around
+      # twenty transitive modules nobody here chose. Needs network access to
+      # vuln.go.dev, and `frontend/build` from the step above, since it loads
+      # package main like vet does.
+      - name: Check for vulnerable dependencies
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
       # Compiles what `task build` (build/windows/Taskfile.yml -> build:native)
       # compiles, with the same flags, but without going through the wails3
