@@ -210,12 +210,21 @@ func executeMouseMoveTask(task Task, app *App) {
 	// reordering should quietly change.
 	robotgo.Move(int(startX), int(startY))
 
-	// Calculate final speed with randomization if enabled
+	// Calculate final speed with randomization if enabled.
+	//
+	// rand.Float64 reads the global source, which Go seeds randomly at startup
+	// (since 1.20) and which is safe for concurrent use - the same source, and
+	// the same reasoning, as the random delay node's draw in actions_delay.go.
+	// Concurrency is not hypothetical: mouse tasks run on the same worker pool.
+	// The code this replaces built a generator per call from
+	// time.Now().UnixNano(), which predates that automatic seeding: two mouse
+	// moves the pool started inside the same clock tick seeded identically and
+	// drew the same "random" speed as each other, which is the opposite of the
+	// human-like jitter this is here to produce.
 	finalSpeed := speedValue
 	if randomize {
-		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		varianceAmount := speedValue * (variance / 100.0)
-		finalSpeed += (r.Float64()*2 - 1) * varianceAmount
+		finalSpeed += (rand.Float64()*2 - 1) * varianceAmount
 	}
 
 	// Set mouse movement speed based on configuration
