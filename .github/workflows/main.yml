@@ -63,6 +63,17 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # Ordered cheapest-first, so the fastest signal fails the run soonest.
+      # Formatting is a file read and a compare; linting parses; the type check
+      # after them is the expensive one. None of the three needs the build.
+      - name: Check frontend formatting
+        working-directory: frontend
+        run: npm run format:check
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
       - name: Type-check frontend
         working-directory: frontend
         run: npm run check
