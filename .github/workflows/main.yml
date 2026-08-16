@@ -42,10 +42,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           # Read from go.mod (go 1.25.0 / toolchain go1.25.12) so the version
           # can never drift from what the module declares.
@@ -53,7 +53,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # Matches local development, and clears the floor in frontend's
           # `engines`. That floor sits *inside* the 20.x range (ESLint 10 wants
@@ -198,7 +198,7 @@ jobs:
         run: go build -tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui" -o bin/Keypress.exe .
 
       - name: Upload Windows binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Keypress-windows-amd64
           path: bin/Keypress.exe
@@ -210,7 +210,7 @@ jobs:
       # number. Deliberately a raw profile and no third-party uploader - open it
       # with `go tool cover -html=coverage.out`.
       - name: Upload Go coverage profile
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-coverage
           path: coverage.out
