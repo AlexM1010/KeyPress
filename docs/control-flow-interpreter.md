@@ -2,6 +2,13 @@
 
 Status: proposed, not implemented. Nothing in `backend/` has been changed for it.
 
+Phase 0 is settled. The app is unreleased, which retires the compatibility
+question the diamond rule turned on; run state is a "store result as" field on
+the nodes that already produce a result; and the loop node takes a count and an
+until-condition together. Those decisions are written into the sections below
+rather than kept as a changelog - this is a design document, not a history of
+one.
+
 ## Why
 
 The engine today is a **dependency DAG**. A node runs once every one of its
@@ -72,8 +79,8 @@ does to someone's real keyboard. Two behaviours change.
 
 ### Fan-out stops being parallel
 
-Today a node with two outgoing edges runs both, concurrently - the queue has
-`defaultWorkerCount` workers. Under a token there is one token.
+Today a node with two outgoing edges runs both, concurrently - the queue runs
+every task the flow makes ready at once. Under a token there is one token.
 
 **Proposal: run them in sequence, depth-first, in a deterministic order** (by
 target node id, which is the order `serializeMacro` already sorts by, so it is
@@ -87,6 +94,11 @@ for the actions this app performs. Where it was real (a delay running alongside
 a keypress), it was also unpredictable, which is not a property you want in a
 macro that types into somebody's editor.
 
+The queue lost its three-worker cap after this was written, so on paper the
+change is now from "as wide as the graph" to one, rather than from three to one.
+The argument is unaffected. What widened was how many tasks may be queued on
+`mouseMu` at once, not how many may touch the mouse.
+
 The obvious next thought is that genuine concurrency should come back as an
 explicit node - and it should not, at least not on any evidence this app
 currently offers. There is one mouse and one keyboard; two branches cannot type
@@ -98,26 +110,29 @@ turns up that `dragWhileMoving` does not already cover.
 
 ### A node on two paths runs twice
 
-This is the breaking one. Today a diamond - `A→B`, `A→C`, `B→D`, `C→D` - runs
-`D` **once**, after both `B` and `C` finish, because `canEnqueue` waits for every
-prerequisite. Under a token, `D` is reached twice and runs twice.
+Today a diamond - `A→B`, `A→C`, `B→D`, `C→D` - runs `D` **once**, after both
+`B` and `C` finish, because `canEnqueue` waits for every prerequisite. Under a
+token, `D` is reached twice and runs twice.
 
-There is no way to keep the old behaviour and have loops: "run each node at most
-once" is precisely what a loop must violate. Blueprints resolve this by letting
-a node execute whenever it is triggered and making the user insert an explicit
-synchronisation node when they need one.
+**Decided: per-arrival execution.** There was never much of a choice - "run each
+node at most once" is precisely what a loop must violate, so keeping the old
+behaviour and having loops are mutually exclusive. Blueprints resolve it the same
+way: a node executes whenever it is triggered, and a user who needs a join
+inserts an explicit synchronisation node.
 
-**Proposal: adopt per-arrival execution, and detect the graphs it would change.**
-On load, walk the graph and flag every node reachable from Start by more than one
-path. Report it through the status panel using the machinery that already exists
-for this exact shape of warning (`warnAboutSkippedNodes` in `execution.go`, which
-already reports "wired-up but unreachable" nodes). A user with a diamond gets
-told, in the same place they already get told about skipped nodes, that it will
-now run twice and where.
+This was written as the item to agree before any code, on the grounds that it is
+the only change that can silently alter what a saved macro does to somebody's
+real keyboard. The app is unreleased. There are no saved macros, nothing is
+silently altered, and this stops being a migration question at all.
 
-This is the single most important item to agree before any code is written. It
-is the only change that can make an existing macro do something different rather
-than something differently-ordered.
+What survives is worth keeping on its own merits, but as a **lint rather than a
+safeguard**. On load, walk the graph and flag every node reachable from Start by
+more than one path, and report it through the status panel using the machinery
+that already exists for this shape of warning (`warnAboutSkippedNodes` in
+`execution.go`, which reports "wired-up but unreachable" nodes). A diamond is far
+more often a drawing mistake than an intent to run something twice, and saying so
+is useful whether or not anyone's macro predates it. It no longer gates Phase 2,
+and can ship whenever it is convenient.
 
 ## The gap that is not a node: run state
 
@@ -134,9 +149,9 @@ is the binding constraint on everything above:
   worth returning to, a counter.
 
 Every comparable tool has this: Blueprint variables, n8n's item data,
-AutoHotkey's variables. It belongs in **Phase 0**, with the diamond rule, because
-it changes what a Loop node and a Branch node are, and retrofitting it after the
-interpreter ships means opening both again.
+AutoHotkey's variables. It is the whole of **Phase 0** now that the diamond rule
+is settled, because it changes what a Loop node and a Branch node are, and
+retrofitting it after the interpreter ships means opening both again.
 
 It does not have to be much, and it should not be. The proposal is the smallest
 thing that answers the three cases above:
@@ -145,9 +160,14 @@ thing that answers the three cases above:
   discarded when it ends. Not persisted, not shared between macros, not visible
   to the frontend except as a debugging read-out. A macro that wants to remember
   something across runs is a different feature and a much larger one.
-- **Set** by a node - either a dedicated Set Variable node, or an optional
-  "store result as" field on the nodes that produce a result (Wait For Color
-  knows the colour it matched; Mouse Move knows where it ended).
+- **Set** by an optional "store result as" field on the nodes that already
+  produce a result: Wait For Color knows the colour it matched, Mouse Move knows
+  where it ended. Decided in favour of this over a dedicated Set Variable node.
+  The value exists either way, and a field on the node that produced it adds no
+  node type, no handler, and no second place to look when asking where a value
+  came from. A Set Variable node earns its place when something wants to write a
+  value nothing produced - a literal, or an expression - which is a later feature
+  resting on a different argument.
 - **Read** by conditions, and by nothing else to begin with. Interpolating
   variables into a Type Text node is the obvious next want and the obvious next
   scope creep; it should wait until the condition case is working.
@@ -177,7 +197,14 @@ Svelte Flow 1.x upgrade. Delete it, independently of any of this.
   Color, "is this window focused". The cheapest first one is a timeout output on
   Wait For Color, since that node already knows how to answer the question and
   currently has nowhere to say no.
-- **Loop** - a count, or a while-condition once state exists.
+- **Loop** - a count *and* an until-condition, taken together rather than
+  count-first. They share one node and one back-edge: the count is the budget,
+  the condition is the exit, and a loop carrying both is "retry up to five times
+  until the pixel turns green", which is the case that motivates any of this.
+  Either alone is a special case of the pair - no condition means "until the
+  count runs out", no count means "until the condition holds" - and a loop with
+  neither is a mistake the editor should refuse rather than a construct to
+  support.
 - **Stop** - early exit. Once branches exist, "if X, we are done" needs somewhere
   to go; today the only way a macro ends is running out of edges.
 
@@ -233,14 +260,19 @@ Each of these should be a test before it is an implementation.
 7. **Stop interrupts a node in progress.** A 30-second Wait For Color must not
    keep a loop alive well past the user's panic-press.
 
-   The delay, colour and keyboard handlers already take the queue context.
-   **The mouse handlers do not reference it at all** - `actions_mouse.go` has
-   zero context references today - so a `MoveSmooth` crossing the screen at a
-   human speed runs to completion whatever the user presses. That is tolerable
-   in a macro that ends by itself and much less so in one that loops, since the
-   stop can only ever land between iterations. Giving the mouse handlers the
-   same treatment the others already have is a prerequisite of Phase 4, not a
-   nicety, and it is worth doing on its own account before any of this.
+   The delay, colour and keyboard handlers already take the queue context - ten
+   references in `actions_delay.go`, six in `actions_keyboard.go`, three in
+   `actions_color.go`. **The mouse handlers do not reference it at all** -
+   `actions_mouse.go` has zero - so a `MoveSmooth` crossing the screen at a human
+   speed runs to completion whatever the user presses. That is tolerable in a
+   macro that ends by itself and much less so in one that loops, where the stop
+   can only ever land between iterations.
+
+   Promoted to a blocker, and the first code to write. It was filed here as a
+   Phase 4 prerequisite; with loops actually being built, it is the difference
+   between a runaway macro the user can stop and one they cannot, which is not
+   something to find out in Phase 4. It depends on nothing else here and improves
+   the engine as it stands.
 
 ## The toggle hotkey
 
@@ -274,7 +306,7 @@ The interpreter **deletes more than it adds**. Roughly, in `backend/`:
 | `reportStall` / `execution-stalled` | gone; replaced by the iteration budget |
 | static `reachableFrom` prune of the dependency map | kept, but only as a **lint** for the UI, not as runtime pruning |
 | `handleCompletions` goroutine | shrinks to the walk loop |
-| `TaskQueue` worker pool (`defaultWorkerCount`) | one runner; the generation token and context stay |
+| `TaskQueue` dispatcher, unlimited concurrency | one runner; the generation token and context stay |
 
 `reachableFrom` and its eight `testdata/reachability` fixtures keep earning their
 place: "no path from Start" is still exactly the question the editor wants to
@@ -287,10 +319,13 @@ Each phase leaves the tree green - `npm run check`, `npm test`, `go vet`,
 `go test -race` - and is independently revertible, in the same way the Svelte 5
 work was.
 
-**Phase 0 - decide the diamond rule and the run state.** No code. Agree the
-per-arrival semantics and the load-time warning above, because everything
-downstream assumes them; and agree the shape of the run state, because a Loop
-node and a Branch node are different features depending on whether one exists.
+**Phase 0 - decided, no code.** Per-arrival execution, run state as a "store
+result as" field, and a loop node taking a count and an until-condition. All
+three are written into the sections above.
+
+**Phase 0.5 - give the mouse handlers the context.** The one piece of code that
+belongs before the refactor starts, for the reason under item 7 above. Small,
+self-contained, and worth having whether or not the rest of this is ever built.
 
 `SVGNode` can be deleted at any point and has no dependency on any of this.
 
@@ -311,8 +346,8 @@ run state it reads its condition from. No scheduler changes - Phase 2 already
 made this expressible. A timeout output on Wait For Color is the cheapest first
 condition and needs no new world queries.
 
-**Phase 4 - loops and the toggle.** A loop node (count, or until-condition), a
-Stop node, the minimum yield, and `RunMacro` becoming toggle-shaped. Also no
+**Phase 4 - loops and the toggle.** A loop node taking a count and an
+until-condition, a Stop node, the minimum yield, and `RunMacro` becoming toggle-shaped. Also no
 scheduler changes: a loop is an edge, and by this point an edge is all it needs
 to be.
 
@@ -327,9 +362,14 @@ JSON fixtures beside the reachability ones:
 - a linear macro visits its nodes in order, once each
 - a node with two outgoing edges visits both branches, depth-first, in a stable
   order that does not depend on map iteration
-- a diamond visits the join **twice**, and the load-time check names it
+- a diamond visits the join **twice**, and the load-time lint names it
 - a self-edge loops, and stops on cancellation within one iteration
 - a loop with an iteration budget of *n* stops at *n* and reports it
+- a loop with only a count runs exactly that many times; one with only an
+  until-condition stops the first time the condition holds; one with both stops
+  at whichever comes first, tested in both orders
+- a value written by "store result as" is readable by a later node's condition,
+  and a node that stored nothing leaves the name unset rather than empty
 - cancellation between two instantaneous nodes stops the run before the second
 - a branch node's `next` selects exactly one outgoing edge, and an unknown
   `next` ends that path rather than panicking
@@ -345,17 +385,15 @@ cover node payloads, which this does not touch.
 
 ## What this design does not decide
 
-- **The loop node's shape** - fixed count, until-condition, or both. Phase 4.
 - **Nested loop semantics**, and with them whether Break and Continue are worth
   having. Only answerable once loops exist.
-- **Where run state is written from** - a dedicated Set Variable node, or a
-  "store result as" field on the nodes that already produce a result. Phase 0
-  needs to agree that the state exists and what it holds; this is a smaller
-  question that can follow.
-- **Whether `defaultWorkerCount` and the pool are deleted or kept.** With the
-  Parallel node ruled out there is less reason to keep them, but the generation
-  token is needed regardless and the queue costs little, so this can be decided
-  late.
+- **What a condition is written in.** An until-condition needs a way to say "this
+  variable equals that", and whether that is a small fixed set of comparisons in
+  the node's own UI or something more expressive is a Phase 3 question, best
+  answered once one real condition exists to generalise from.
+- **Whether the queue is deleted or kept.** With the Parallel node ruled out
+  there is less reason to keep it, but the generation token is needed regardless
+  and the queue costs little, so this can be decided late.
 
 ## Sources
 
