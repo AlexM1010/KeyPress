@@ -1,5 +1,15 @@
-# Go tooling writes LF and gofmt treats a CRLF file as unformatted, so `gofmt
-# -l` reports the whole file. Left to core.autocrlf (true on Windows) the .go
-# files come back out of a checkout with CRLF and every one of them is flagged.
-# Pinning them here keeps the working tree matching what gofmt produces.
-*.go text eol=lf
+# Everything checks out LF, on every platform.
+#
+# Two of the formatters here treat a CRLF file as entirely unformatted and
+# rewrite the whole thing: gofmt, and Prettier, whose endOfLine defaults to lf.
+# Left to core.autocrlf - true by default on Windows, the CI runner included - a
+# checkout hands both of them CRLF and every file is reported.
+#
+# That is not hypothetical. This started as `*.go text eol=lf` alone, to stop
+# `gofmt -l` flagging the whole tree; the frontend never got the same treatment,
+# and the first `prettier --check` to run on a Windows runner failed with every
+# file in frontend/ listed, `.prettierrc` among them. Same cause, same fix,
+# applied once rather than per language.
+#
+# text=auto still lets git detect binary content and leave it alone.
+* text=auto eol=lf
