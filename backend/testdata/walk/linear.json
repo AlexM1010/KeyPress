@@ -1,0 +1,16 @@
+{
+  "description": "A linear macro runs its nodes in order, once each. Every edge carries the sourceHandle the app really draws, which the only-output rule takes regardless of its name.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "second", "type": "MouseMoveNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "third", "type": "DelayNode", "position": { "x": 400, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "second", "sourceHandle": "right" },
+      { "id": "e2", "source": "second", "target": "third", "sourceHandle": "right" }
+    ]
+  },
+  "visits": ["start", "second", "third"],
+  "multipath": []
+}

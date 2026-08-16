@@ -20,9 +20,8 @@
 	// unused; the export is deliberate in each case. `NodeDataPayload` is the
 	// constraint on the exported `FlowNode<TData>` and `StoredNode` is a member
 	// of the exported `StoredFlowData`, so anything naming either generic needs
-	// them importable; `NodeStyle` and `NodeShape` spell out the exported
-	// `SVGNodeData` the same way. Un-exporting them to satisfy knip would make
-	// the public types unusable from outside.
+	// them importable. Un-exporting them to satisfy knip would make the public
+	// types unusable from outside.
 	"ignoreExportsUsedInFile": true,
 
 	// Not a real entry point - listing it here is how knip is told to stop

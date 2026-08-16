@@ -1,0 +1,68 @@
+{
+  "description": "A loop pair inside a loop pair. The inner loop's count is its own each time the outer loop enters it: two outer iterations of a two-iteration inner loop run the innermost node four times, not two. That is what the frame stack buys - the inner frame sits above the outer one and is popped when the inner loop leaves by `done`, so the next entry counts from zero. Frames are keyed by the Loop Start's node id alone; the `loopId` each half carries is the editor's, and nothing in the walk reads it.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "outer",
+        "type": "LoopStartNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "count": 2, "loopId": "outer-loop" }
+      },
+      {
+        "id": "inner",
+        "type": "LoopStartNode",
+        "position": { "x": 400, "y": 0 },
+        "data": { "count": 2, "loopId": "inner-loop" }
+      },
+      { "id": "work", "type": "MouseClickNode", "position": { "x": 600, "y": 0 }, "data": {} },
+      {
+        "id": "innerEnd",
+        "type": "LoopEndNode",
+        "position": { "x": 800, "y": 0 },
+        "data": { "loopId": "inner-loop" }
+      },
+      {
+        "id": "outerEnd",
+        "type": "LoopEndNode",
+        "position": { "x": 800, "y": 200 },
+        "data": { "loopId": "outer-loop" }
+      },
+      { "id": "after", "type": "DelayNode", "position": { "x": 200, "y": 400 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "outer", "sourceHandle": "right" },
+      { "id": "e2", "source": "outer", "target": "inner", "sourceHandle": "body" },
+      { "id": "e3", "source": "inner", "target": "work", "sourceHandle": "body" },
+      { "id": "e4", "source": "work", "target": "innerEnd", "sourceHandle": "right" },
+      { "id": "e5", "source": "innerEnd", "target": "inner", "sourceHandle": "back" },
+      { "id": "e6", "source": "inner", "target": "outerEnd", "sourceHandle": "done" },
+      { "id": "e7", "source": "outerEnd", "target": "outer", "sourceHandle": "back" },
+      { "id": "e8", "source": "outer", "target": "after", "sourceHandle": "done" }
+    ]
+  },
+  "visits": [
+    "start",
+    "outer",
+    "inner",
+    "work",
+    "innerEnd",
+    "inner",
+    "work",
+    "innerEnd",
+    "inner",
+    "outerEnd",
+    "outer",
+    "inner",
+    "work",
+    "innerEnd",
+    "inner",
+    "work",
+    "innerEnd",
+    "inner",
+    "outerEnd",
+    "outer",
+    "after"
+  ],
+  "multipath": []
+}

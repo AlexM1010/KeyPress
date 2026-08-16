@@ -223,6 +223,11 @@ func startNodeMacroKeys(flow *FlowData) []string {
 // and is logged; refusing to start Keypress over it would be far worse. The
 // recording stays in the macro, so it starts working again once whatever
 // claimed it goes away.
+//
+// This is the function that makes hotkeyMux's invariant what it is: Register and
+// Unregister below both marshal to the main thread and block until it answers,
+// and both are called with the lock held. Nothing on the main thread may
+// therefore wait for hotkeyMux - see its declaration in app.go.
 func (a *App) syncHotkeys() {
 	if a.wails == nil {
 		return

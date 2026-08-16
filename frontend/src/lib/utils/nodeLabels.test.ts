@@ -20,7 +20,17 @@ const node = (id: string, type: string, x = 0, y = 0): LabellableNode => ({
 	position: { x, y }
 });
 
-const edge = (source: string, target: string): LabellableEdge => ({ source, target });
+/**
+ * `sourceHandle` is optional here for the same reason it is optional on the
+ * type: most nodes have one output and their edges leave it unnamed. Where a
+ * test cares which output an edge leaves by - which is the whole point of a
+ * Sequence node - it says so.
+ */
+const edge = (source: string, target: string, sourceHandle?: string): LabellableEdge => ({
+	source,
+	target,
+	sourceHandle
+});
 
 /** The ids in step order - what the label map is actually for. */
 const orderOf = (labels: Map<string, NodeLabel>): string[] =>
@@ -32,28 +42,121 @@ const stepOf = (labels: Map<string, NodeLabel>, id: string): number => {
 	return label.step;
 };
 
-describe('buildNodeLabels: order agrees with the engine', () => {
-	it('orders a join after ALL of its inputs, not after the first one', () => {
-		// S -> A -> J
-		// S -> B -> C -> J
-		//
-		// Plain breadth-first would release J as soon as A was seen and place it
-		// level with C. `canEnqueue` in the Go engine waits for every
-		// prerequisite, so J really runs last, and the labelling has to say so.
+describe('buildNodeLabels: the order is the order the token visits nodes', () => {
+	it('follows a straight line of nodes in the order it is drawn', () => {
 		const nodes = [
 			node('S', 'StartNode', 0, 0),
 			node('A', 'DelayNode', 100, 0),
-			node('B', 'DelayNode', 100, 100),
-			node('C', 'DelayNode', 200, 100),
-			node('J', 'DelayNode', 300, 50)
+			node('B', 'DelayNode', 200, 0)
 		];
-		const edges = [edge('S', 'A'), edge('S', 'B'), edge('B', 'C'), edge('A', 'J'), edge('C', 'J')];
+
+		const labels = buildNodeLabels(nodes, [edge('S', 'A'), edge('A', 'B')]);
+
+		expect(orderOf(labels)).toEqual(['S', 'A', 'B']);
+	});
+
+	it('runs a Sequence output to its end before it starts the next one', () => {
+		// S -> Q, and Q fans out: out-1 into A1 -> A2, out-2 into B1 -> B2.
+		//
+		// Depth-first is the claim. Breadth-first would give S, Q, A1, B1, A2, B2
+		// - the two branches interleaved - which is precisely what the token
+		// cannot do: it is one token, and it does not come back to Q until A2 has
+		// finished.
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('Q', 'SequenceNode', 100, 0),
+			node('A1', 'DelayNode', 200, 0),
+			node('A2', 'DelayNode', 300, 0),
+			node('B1', 'DelayNode', 200, 100),
+			node('B2', 'DelayNode', 300, 100)
+		];
+		// Deliberately out of handle order in the array: the sort is what decides,
+		// not the order the edges happen to arrive in.
+		const edges = [
+			edge('S', 'Q'),
+			edge('Q', 'B1', 'out-2'),
+			edge('B1', 'B2'),
+			edge('Q', 'A1', 'out-1'),
+			edge('A1', 'A2')
+		];
 
 		const labels = buildNodeLabels(nodes, edges);
 
-		expect(orderOf(labels)).toEqual(['S', 'A', 'B', 'C', 'J']);
-		// The claim that distinguishes longest-path from breadth-first.
-		expect(stepOf(labels, 'J')).toBeGreaterThan(stepOf(labels, 'C'));
+		expect(orderOf(labels)).toEqual(['S', 'Q', 'A1', 'A2', 'B1', 'B2']);
+	});
+
+	it('numbers a join the FIRST time the token reaches it, not after every input', () => {
+		// S -> Q, Q -out-1-> A -> J, Q -out-2-> B -> J.
+		//
+		// The old dependency engine ran J once, after both A and B, and the
+		// labelling had to order it last to match. The token reaches J straight
+		// out of A - and reaches it again out of B, where it runs a second time
+		// but keeps the number it already has, because a node has one name.
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('Q', 'SequenceNode', 100, 0),
+			node('A', 'DelayNode', 200, 0),
+			node('B', 'DelayNode', 200, 100),
+			node('J', 'DelayNode', 300, 50)
+		];
+		const edges = [
+			edge('S', 'Q'),
+			edge('Q', 'A', 'out-1'),
+			edge('Q', 'B', 'out-2'),
+			edge('A', 'J'),
+			edge('B', 'J')
+		];
+
+		const labels = buildNodeLabels(nodes, edges);
+
+		expect(orderOf(labels)).toEqual(['S', 'Q', 'A', 'J', 'B']);
+		// The claim that distinguishes the walk from the longest-path scheduler it
+		// replaced: J comes before B, not after everything that feeds it.
+		expect(stepOf(labels, 'J')).toBeLessThan(stepOf(labels, 'B'));
+		// And it is named once, however many times it runs.
+		expect(labels.size).toBe(5);
+	});
+
+	it('sorts nine Sequence outputs the way a plain string sort does', () => {
+		// The reason `SequenceNode` caps at nine: the handle ids are compared as
+		// strings, so `out-10` would sort between `out-1` and `out-2`. Up to nine
+		// the string order and the number order are the same, and this pins that
+		// the walk really does take them 1..9.
+		const outputs = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('Q', 'SequenceNode', 100, 0),
+			// Positions run backwards up the canvas, so canvas order cannot be what
+			// produces the answer.
+			...outputs.map((n) => node(`n${n}`, 'DelayNode', 200, 1000 - n * 100))
+		];
+		const edges = [
+			edge('S', 'Q'),
+			// Reversed, again so the array order cannot be what produces the answer.
+			...outputs
+				.slice()
+				.reverse()
+				.map((n) => edge('Q', `n${n}`, `out-${n}`))
+		];
+
+		const labels = buildNodeLabels(nodes, edges);
+
+		expect(orderOf(labels)).toEqual(['S', 'Q', ...outputs.map((n) => `n${n}`)]);
+	});
+
+	it('takes an edge with no handle before one that names an output', () => {
+		// An unnamed handle is "" and sorts first. Not a shape the editor draws -
+		// a node either has one unnamed output or a set of named ones - but a
+		// saved macro can hold it, and the order must not be the array's.
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('Q', 'SequenceNode', 100, 0),
+			node('named', 'DelayNode', 200, 0),
+			node('unnamed', 'DelayNode', 200, 100)
+		];
+		const edges = [edge('S', 'Q'), edge('Q', 'named', 'out-1'), edge('Q', 'unnamed')];
+
+		expect(orderOf(buildNodeLabels(nodes, edges))).toEqual(['S', 'Q', 'unnamed', 'named']);
 	});
 
 	it('starts at the Start node however deep in the graph it is drawn', () => {
@@ -68,14 +171,12 @@ describe('buildNodeLabels: order agrees with the engine', () => {
 	});
 
 	it('ignores edges pointing INTO the Start node', () => {
-		// `StartExecution` enqueues Start unconditionally, so a back edge into it
-		// is not a prerequisite - and must not be read as one, or Start would
-		// wait forever on a graph that runs perfectly well.
+		// The run begins at Start unconditionally, so an edge back into it is a
+		// loop the walk has already been round rather than a way in.
 		const nodes = [node('S', 'StartNode', 0, 0), node('A', 'DelayNode', 0, 100)];
 
 		const labels = buildNodeLabels(nodes, [edge('S', 'A'), edge('A', 'S')]);
 
-		// Not a cycle as far as the run is concerned: both nodes are released.
 		expect(orderOf(labels)).toEqual(['S', 'A']);
 		expect(stepOf(labels, 'S')).toBe(1);
 	});
@@ -107,10 +208,10 @@ describe('buildNodeLabels: order agrees with the engine', () => {
 });
 
 describe('buildNodeLabels: cycles', () => {
-	it('terminates instead of spinning, and still labels the cyclic remainder', () => {
-		// A -> B -> C -> A. Kahn's algorithm never releases any of them; the
-		// engine would report exactly this set as a stall, and the stall message
-		// names them - so they must all have a label.
+	it('terminates instead of spinning, and numbers each node once', () => {
+		// A -> B -> C -> A. A cycle is a loop now rather than a deadlock, and the
+		// walk visits each node once so it ends: the token would go round again,
+		// but the node has one name and one number.
 		const nodes = [
 			node('S', 'StartNode', 0, 0),
 			node('A', 'DelayNode', 0, 100),
@@ -122,12 +223,13 @@ describe('buildNodeLabels: cycles', () => {
 		const labels = buildNodeLabels(nodes, edges);
 
 		expect(labels.size).toBe(4);
-		// Start is released; the cycle is appended after it in canvas order.
 		expect(orderOf(labels)).toEqual(['S', 'A', 'B', 'C']);
 	});
 
-	it('appends a node stuck behind a cycle as well', () => {
-		// D hangs off the cycle: it can never be released either.
+	it('carries on past a loop to whatever hangs off it', () => {
+		// A -> B -> A is the loop; D hangs off B. The old Kahn pass could never
+		// release any of these and appended all three in canvas order; the token
+		// walks straight through them.
 		const nodes = [
 			node('S', 'StartNode', 0, 0),
 			node('A', 'DelayNode', 0, 100),
@@ -139,6 +241,14 @@ describe('buildNodeLabels: cycles', () => {
 		const labels = buildNodeLabels(nodes, edges);
 
 		expect(orderOf(labels)).toEqual(['S', 'A', 'B', 'D']);
+	});
+
+	it('walks a self-edge once', () => {
+		const nodes = [node('S', 'StartNode', 0, 0), node('L', 'DelayNode', 0, 100)];
+
+		const labels = buildNodeLabels(nodes, [edge('S', 'L'), edge('L', 'L')]);
+
+		expect(orderOf(labels)).toEqual(['S', 'L']);
 	});
 });
 
@@ -179,9 +289,11 @@ describe('buildNodeLabels: what the run cannot reach', () => {
 		expect(orderOf(labels)).toEqual(['S', 'E1', 'E2', 'D1', 'D2']);
 	});
 
-	it('walks a dead branch in the same longest-path order', () => {
-		// The join rule holds inside a dead branch too: prerequisites are counted
-		// within the group, not globally.
+	it('walks a dead branch from its roots, as the run would have walked it', () => {
+		// P -> Q -> R -> Z, and P -> Z. Nothing starts this branch, so it has no
+		// token order of its own - but walking it from the node nothing points at
+		// still reads as a branch, where listing it by canvas position (P, Z, Q,
+		// R) would put the join second.
 		const nodes = [
 			node('S', 'StartNode', 0, 0),
 			node('P', 'DelayNode', 0, 100),
@@ -194,6 +306,22 @@ describe('buildNodeLabels: what the run cannot reach', () => {
 		const labels = buildNodeLabels(nodes, edges);
 
 		expect(orderOf(labels)).toEqual(['S', 'P', 'Q', 'R', 'Z']);
+	});
+
+	it('falls back to canvas order for a dead branch that is nothing but a loop', () => {
+		// C1 <-> C2 has no root - every member is pointed at from inside the
+		// group - so there is nowhere obvious to start and the topmost node is as
+		// good an answer as any.
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('C2', 'DelayNode', 0, 300),
+			node('C1', 'DelayNode', 0, 100)
+		];
+		const edges = [edge('C1', 'C2'), edge('C2', 'C1')];
+
+		const labels = buildNodeLabels(nodes, edges);
+
+		expect(orderOf(labels)).toEqual(['S', 'C1', 'C2']);
 	});
 
 	it('puts nodes in no edge at all last, however high on the canvas they sit', () => {
@@ -218,51 +346,73 @@ describe('buildNodeLabels: what the run cannot reach', () => {
 
 		const labels = buildNodeLabels(nodes, [edge('A', 'B')]);
 
-		// Nothing is reachable, so both are a dead branch - still named, in
-		// longest-path order within the branch.
+		// Nothing is reachable, so both are a dead branch - still named, and still
+		// walked from the node nothing points at rather than listed by y, which
+		// would put B first.
 		expect(orderOf(labels)).toEqual(['A', 'B']);
 	});
 });
 
 describe('buildNodeLabels: ties are broken deterministically', () => {
-	it('orders nodes that come ready together by y, then x, then id', () => {
+	it('orders two edges leaving one handle by target id, not by canvas position', () => {
+		// The editor now refuses to draw this - one output takes one edge - but a
+		// macro saved before that rule can hold it, and the two branches must
+		// come out in the same order every time whatever the array says.
+		const nodes = [
+			node('S', 'StartNode', 0, 0),
+			node('zeta', 'DelayNode', 0, 10),
+			node('alpha', 'DelayNode', 0, 900)
+		];
+		const edges = [edge('S', 'zeta', 'right'), edge('S', 'alpha', 'right')];
+
+		// Canvas order would say zeta first; the target id says alpha.
+		expect(orderOf(buildNodeLabels(nodes, edges))).toEqual(['S', 'alpha', 'zeta']);
+	});
+
+	it('orders unwired nodes by y, then x, then id', () => {
+		// The last bucket is the one canvas order still governs outright.
 		const nodes = [
 			node('S', 'StartNode', 0, -100),
 			node('lower-right', 'DelayNode', 50, 10),
 			node('lower-left', 'DelayNode', 10, 10),
 			node('upper', 'DelayNode', 999, 0)
 		];
-		const edges = [edge('S', 'lower-right'), edge('S', 'lower-left'), edge('S', 'upper')];
 
-		const labels = buildNodeLabels(nodes, edges);
+		const labels = buildNodeLabels(nodes, []);
 
 		expect(orderOf(labels)).toEqual(['S', 'upper', 'lower-left', 'lower-right']);
 	});
 
-	it('falls back to the id when two nodes sit on exactly the same spot', () => {
+	it('falls back to the id when two unwired nodes sit on exactly the same spot', () => {
 		const nodes = [
 			node('S', 'StartNode', 0, -100),
 			node('m-b', 'DelayNode', 10, 10),
 			node('m-a', 'DelayNode', 10, 10)
 		];
-		const edges = [edge('S', 'm-b'), edge('S', 'm-a')];
 
-		expect(orderOf(buildNodeLabels(nodes, edges))).toEqual(['S', 'm-a', 'm-b']);
+		expect(orderOf(buildNodeLabels(nodes, []))).toEqual(['S', 'm-a', 'm-b']);
 	});
 
 	it('does not depend on the order the nodes and edges arrive in', () => {
 		const nodes = [
 			node('S', 'StartNode', 0, 0),
-			node('A', 'DelayNode', 100, 0),
-			node('B', 'DelayNode', 100, 100),
-			node('J', 'DelayNode', 200, 50)
+			node('Q', 'SequenceNode', 100, 0),
+			node('A', 'DelayNode', 200, 0),
+			node('B', 'DelayNode', 200, 100),
+			node('J', 'DelayNode', 300, 50)
 		];
-		const edges = [edge('S', 'A'), edge('S', 'B'), edge('A', 'J'), edge('B', 'J')];
+		const edges = [
+			edge('S', 'Q'),
+			edge('Q', 'A', 'out-1'),
+			edge('Q', 'B', 'out-2'),
+			edge('A', 'J'),
+			edge('B', 'J')
+		];
 
 		const forwards = orderOf(buildNodeLabels(nodes, edges));
 		const backwards = orderOf(buildNodeLabels([...nodes].reverse(), [...edges].reverse()));
 
-		expect(forwards).toEqual(['S', 'A', 'B', 'J']);
+		expect(forwards).toEqual(['S', 'Q', 'A', 'J', 'B']);
 		expect(backwards).toEqual(forwards);
 	});
 });
@@ -275,9 +425,17 @@ describe('buildNodeLabels: what a node is called', () => {
 			node('c', 'MouseClickNode', 0, 200),
 			node('m', 'MouseMoveNode', 0, 300),
 			node('w', 'ColorPickerNode', 0, 400),
-			node('k', 'KeyPressNode', 0, 500)
+			node('k', 'KeyPressNode', 0, 500),
+			node('q', 'SequenceNode', 0, 600)
 		];
-		const edges = [edge('S', 'd'), edge('d', 'c'), edge('c', 'm'), edge('m', 'w'), edge('w', 'k')];
+		const edges = [
+			edge('S', 'd'),
+			edge('d', 'c'),
+			edge('c', 'm'),
+			edge('m', 'w'),
+			edge('w', 'k'),
+			edge('k', 'q')
+		];
 
 		const labels = buildNodeLabels(nodes, edges);
 
@@ -287,7 +445,8 @@ describe('buildNodeLabels: what a node is called', () => {
 			'Mouse Click',
 			'Mouse Move',
 			'Wait For Color',
-			'Keypress'
+			'Keypress',
+			'Sequence'
 		]);
 	});
 
@@ -344,24 +503,25 @@ describe('nodeLabel', () => {
 });
 
 describe('inFlowOrder', () => {
+	// S -> Q, Q -out-1-> A, Q -out-2-> B. Steps: S 1, Q 2, A 3, B 4.
 	const labels = buildNodeLabels(
 		[
 			node('S', 'StartNode', 0, 0),
-			node('A', 'DelayNode', 100, 0),
-			node('B', 'DelayNode', 100, 100),
-			node('J', 'DelayNode', 200, 50)
+			node('Q', 'SequenceNode', 100, 0),
+			node('A', 'DelayNode', 200, 0),
+			node('B', 'DelayNode', 200, 100)
 		],
-		[edge('S', 'A'), edge('S', 'B'), edge('A', 'J'), edge('B', 'J')]
+		[edge('S', 'Q'), edge('Q', 'A', 'out-1'), edge('Q', 'B', 'out-2')]
 	);
 
 	it('sorts reported ids into the order the flow would have run them', () => {
-		expect(inFlowOrder(labels, ['J', 'B', 'S', 'A'])).toEqual(['S', 'A', 'B', 'J']);
+		expect(inFlowOrder(labels, ['B', 'A', 'S', 'Q'])).toEqual(['S', 'Q', 'A', 'B']);
 	});
 
 	it('does not mutate the list it was given', () => {
-		const reported = ['J', 'A'];
+		const reported = ['B', 'A'];
 		inFlowOrder(labels, reported);
-		expect(reported).toEqual(['J', 'A']);
+		expect(reported).toEqual(['B', 'A']);
 	});
 
 	it('puts unknown ids last, in a stable order of their own', () => {
@@ -369,6 +529,6 @@ describe('inFlowOrder', () => {
 	});
 
 	it('keeps duplicates rather than collapsing them', () => {
-		expect(inFlowOrder(labels, ['J', 'A', 'A'])).toEqual(['A', 'A', 'J']);
+		expect(inFlowOrder(labels, ['B', 'A', 'A'])).toEqual(['A', 'A', 'B']);
 	});
 });

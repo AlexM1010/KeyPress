@@ -1,0 +1,27 @@
+{
+  "description": "The smallest loop the editor can draw: a Loop Start wired straight to its Loop End, with nothing in between. A count of three turns it three times and then leaves by `done`, which nothing is wired to, so the run ends there. It replaces the self-edge fixture this directory used to hold - a node wired back to itself is no longer how a loop is drawn, because the back edge belongs to the pair.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "loop",
+        "type": "LoopStartNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "count": 3, "loopId": "loop-1" }
+      },
+      {
+        "id": "end",
+        "type": "LoopEndNode",
+        "position": { "x": 400, "y": 0 },
+        "data": { "loopId": "loop-1" }
+      }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "loop", "sourceHandle": "right" },
+      { "id": "e2", "source": "loop", "target": "end", "sourceHandle": "body" },
+      { "id": "e3", "source": "end", "target": "loop", "sourceHandle": "back" }
+    ]
+  },
+  "visits": ["start", "loop", "end", "loop", "end", "loop", "end", "loop"],
+  "multipath": []
+}

@@ -1,0 +1,31 @@
+{
+  "description": "The loop the editor draws: a Loop Start, a body, and the paired Loop End whose `back` edge returns to the start. A count of two runs the body twice and then leaves by `done`. The Loop Start has two incoming edges - the one that enters it and the one the editor drew from its Loop End - and the lint must not report it, because the second is a back-edge.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "loop",
+        "type": "LoopStartNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "count": 2, "loopId": "loop-1" }
+      },
+      { "id": "body", "type": "MouseClickNode", "position": { "x": 400, "y": 0 }, "data": {} },
+      {
+        "id": "end",
+        "type": "LoopEndNode",
+        "position": { "x": 600, "y": 0 },
+        "data": { "loopId": "loop-1" }
+      },
+      { "id": "after", "type": "DelayNode", "position": { "x": 200, "y": 200 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "loop", "sourceHandle": "right" },
+      { "id": "e2", "source": "loop", "target": "body", "sourceHandle": "body" },
+      { "id": "e3", "source": "body", "target": "end", "sourceHandle": "right" },
+      { "id": "e4", "source": "end", "target": "loop", "sourceHandle": "back" },
+      { "id": "e5", "source": "loop", "target": "after", "sourceHandle": "done" }
+    ]
+  },
+  "visits": ["start", "loop", "body", "end", "loop", "body", "end", "loop", "after"],
+  "multipath": []
+}

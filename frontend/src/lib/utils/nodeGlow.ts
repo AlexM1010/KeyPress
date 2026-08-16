@@ -10,10 +10,12 @@
  * The glow colour a node shows while it is running, keyed by the same node
  * type as `NODE_TYPE_TITLES`.
  *
- * Each value is the hue of that node's own header gradient - Start and Delay
- * are blue, the two mouse nodes green, Keypress orange, Wait For Color
- * indigo - so a running card lights up in its own colour rather than in one
- * shared highlight. The gradients themselves are Tailwind classes on the node
+ * Each value is the hue of that node's own header gradient - Start, Delay and
+ * Sequence are blue, the two mouse nodes green, Keypress orange, Wait For Color
+ * indigo, Branch purple, the two halves of a Loop teal (both, because they are
+ * one construct and a run crossing between them should not change colour) - so a
+ * running card lights up in its own colour rather
+ * than in one shared highlight. The gradients themselves are Tailwind classes on the node
  * components (`export let color`), which is no use as a shadow colour, so the
  * hues are named here as the `--node-glow-*` custom properties `index.scss`
  * defines. As with the titles in `nodeLabels.ts`, the node components are the
@@ -22,10 +24,14 @@
 export const NODE_TYPE_GLOWS: Record<string, string> = {
 	StartNode: '--node-glow-blue',
 	DelayNode: '--node-glow-blue',
+	SequenceNode: '--node-glow-blue',
 	MouseClickNode: '--node-glow-green',
 	MouseMoveNode: '--node-glow-green',
 	ColorPickerNode: '--node-glow-indigo',
-	KeyPressNode: '--node-glow-orange'
+	KeyPressNode: '--node-glow-orange',
+	BranchNode: '--node-glow-purple',
+	LoopStartNode: '--node-glow-teal',
+	LoopEndNode: '--node-glow-teal'
 };
 
 /** For a node type that is not in the table above. */

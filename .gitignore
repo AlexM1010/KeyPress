@@ -16,3 +16,9 @@ bin
 # as an artifact. Running the same command locally should not leave a file to
 # explain.
 coverage.out
+
+# The graphify knowledge graph - graph.json, the interactive graph.html, the
+# report and an extraction cache. All of it is derived from the tree it sits
+# in, and `graphify . --update` rebuilds whatever has changed, so committing it
+# would mean carrying a megabyte that goes stale on every merge.
+graphify-out/

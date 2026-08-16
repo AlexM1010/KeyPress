@@ -351,6 +351,116 @@ func modifierArgs(modifiers []string) []interface{} {
 	return args
 }
 
+// =============================================== what a Hold leaves behind ===============================================
+
+// keyUp is robotgo.KeyUp, reached through a variable rather than called
+// directly, so the suite can prove a stopped run releases what it held without
+// pressing anything on the machine the tests are running on.
+//
+// **Every release goes through it, including sendKeystroke's.** That branch used
+// to call robotgo.KeyUp directly, which meant the one test that drives
+// sendKeystroke - TestSendKeystrokeRecordsAHoldAndForgetsItOnRelease, which
+// releases twice - pressed two real keys on whoever's machine ran the suite,
+// stubbed seam or not. The stray keystroke is the small half of that. The larger
+// half is that main_test.go gives "every task in the suite is a StartNode, the
+// one node type that does not reach robotgo" as the reason its goleak ignore
+// list can stay empty, and a robotgo call from a test makes that reasoning
+// false: if robotgo's cgo path ever parks a goroutine the runtime can see, it
+// surfaces as an unrelated-looking leak and invites exactly the blanket ignore
+// entry that file forbids.
+//
+// KeyDown has no seam, and needs none for now: nothing on a run's exit path
+// presses a key, and no test calls a branch that does.
+var keyUp = robotgo.KeyUp
+
+// heldKey is one keystroke a Hold action pushed down and no Release has let
+// back up.
+//
+// combo is the identity - describeCombo of the same key and modifiers, so
+// "ctrl+shift+a" is one held thing and not three - and key and modifiers are
+// what has to be handed back to robotgo to let it up again.
+type heldKey struct {
+	combo     string
+	key       string
+	modifiers []string
+}
+
+// holdKey records a keystroke that has been left down. Holding the same
+// combination twice records it once: a key is down or it is not, and there is
+// no way to press it twice.
+func (s *runState) holdKey(key string, modifiers []string) {
+	if s == nil {
+		return
+	}
+
+	combo := describeCombo(key, modifiers)
+	for _, held := range s.held {
+		if held.combo == combo {
+			return
+		}
+	}
+	s.held = append(s.held, heldKey{combo: combo, key: key, modifiers: modifiers})
+}
+
+// releaseKey forgets a keystroke a Release node has let back up.
+//
+// The match is on the key **and** its modifiers together, which is how the pair
+// of nodes is drawn: a Release names the same combination its Hold did. A
+// Release naming a different one - ctrl+a held, plain a released - leaves the
+// record in place, so a stop still releases it. That direction is the safe one.
+// robotgo.KeyUp on a key that is already up is a no-op, where a modifier
+// forgotten because something that looked like its release went past is a Ctrl
+// left down over every window the user then touches.
+func (s *runState) releaseKey(key string, modifiers []string) {
+	if s == nil {
+		return
+	}
+
+	combo := describeCombo(key, modifiers)
+	for i, held := range s.held {
+		if held.combo != combo {
+			continue
+		}
+		s.held = append(s.held[:i], s.held[i+1:]...)
+		return
+	}
+}
+
+// releaseHeldKeys lets go of everything the run left down, and is what a
+// cancelled run calls on its way out (finishRun).
+//
+// This is the guarantee sendKeystroke could not make on its own. A Hold node
+// deliberately leaves a key down for a later Release node, and "the Release
+// never runs" was simply the documented hazard - a handler has no idea which
+// other nodes exist. The run does, and it matters far more now that RunMacro is
+// a toggle: the keystroke that stops a macro arrives while the macro may be
+// holding modifiers down, and a stuck Ctrl or Shift is not a problem confined
+// to the macro that caused it. It is the same guarantee the deferred drag
+// release in actions_mouse.go gives for the mouse button.
+//
+// Scoped to cancellation on purpose. A macro that ends normally having
+// deliberately left a key held is what this app has always done, and changing
+// that is a separate decision.
+//
+// Released in reverse order - last held, first let up - so a modifier held
+// before the key it modifies is the last thing to go. Failures are logged and
+// the rest still released: a key that will not come up is exactly when the
+// others matter most.
+func (s *runState) releaseHeldKeys() {
+	if s == nil || len(s.held) == 0 {
+		return
+	}
+
+	for i := len(s.held) - 1; i >= 0; i-- {
+		held := s.held[i]
+		log.Printf("Releasing %s, which the run left held", held.combo)
+		if err := keyUp(held.key, modifierArgs(held.modifiers)...); err != nil {
+			log.Printf("Could not release %s: %v", held.combo, err)
+		}
+	}
+	s.held = nil
+}
+
 // sendKeystroke drives key plus modifiers for one of the key actions:
 //
 //   - Press:   hold the key down for duration, then release it. Entirely
@@ -361,14 +471,20 @@ func modifierArgs(modifiers []string) []interface{} {
 // Hold and Release are two halves of one gesture split across two nodes. That
 // works because the "is this key down" state lives in the OS keyboard driver,
 // not in this engine, so a Hold on one node and a Release on a later one need
-// nothing passed between them. What the engine genuinely cannot promise is that
-// the Release ever runs: press Stop, hit the idle timeout, or wire a flow that
-// simply forgets the Release, and the key stays physically down after the macro
-// ends. Nothing here can undo that, because a handler has no idea which other
-// nodes exist. Press carries no such hazard - it releases even when interrupted.
+// nothing passed between them. What the engine cannot promise is that the
+// Release ever runs: hit the idle timeout, or wire a flow that simply forgets
+// the Release, and the key stays physically down after the macro ends. Press
+// carries no such hazard - it releases even when interrupted.
+//
+// Stop is no longer on that list, and that is what state is for here. A Hold
+// records the combination on the run and a Release un-records it, so a
+// cancelled run can let go of whatever is left (releaseHeldKeys above). The
+// comment this replaces said nothing here could undo a Hold "because a handler
+// has no idea which other nodes exist", which was true when a handler was all
+// there was; the run knows, and it is handed to every handler.
 //
 // Reports whether the run was canceled part-way, and any error worth surfacing.
-func sendKeystroke(ctx context.Context, action, key string, modifiers []string, duration time.Duration) (canceled bool, err error) {
+func sendKeystroke(ctx context.Context, state *runState, action, key string, modifiers []string, duration time.Duration) (canceled bool, err error) {
 	mods := modifierArgs(modifiers)
 
 	switch action {
@@ -395,12 +511,22 @@ func sendKeystroke(ctx context.Context, action, key string, modifiers []string, 
 		if err := robotgo.KeyDown(key, mods...); err != nil {
 			return false, fmt.Errorf("could not press key %q: %w", key, err)
 		}
+		// Recorded only once the key is really down, so a KeyDown that failed
+		// does not leave the run trying to release something it never pressed.
+		state.holdKey(key, modifiers)
 
 	case keyActionRelease:
 		log.Printf("Releasing %s", describeCombo(key, modifiers))
-		if err := robotgo.KeyUp(key, mods...); err != nil {
+		// Through the keyUp seam, like releaseHeldKeys - the two are the same
+		// act, and a Release node that went straight to robotgo would be the one
+		// keystroke a test could not stub. See the comment on keyUp.
+		if err := keyUp(key, mods...); err != nil {
+			// Un-recorded only on success, for the mirror of the reason above: a
+			// release that failed leaves the key down, and the record is what
+			// gets a stop to try again.
 			return false, fmt.Errorf("could not release key %q: %w", key, err)
 		}
+		state.releaseKey(key, modifiers)
 	}
 
 	return false, nil
@@ -425,23 +551,28 @@ func sendKeystroke(ctx context.Context, action, key string, modifiers []string, 
 // package-level global that a concurrent task writes (the key-code lookup and
 // the modifier flags are computed into locals), so keyboard tasks are free to
 // run alongside mouse tasks.
-func executeKeyPressTask(task Task, app *App) {
+//
+// ctx is the context of the run this task belongs to, so Stop's cancel cuts a
+// hold short and Stop's wg.Wait is never held up by it. It is a parameter rather
+// than something read out of app.runner - see executeDelayTask for why the
+// difference matters.
+func executeKeyPressTask(ctx context.Context, task Task, state *runState, app *App) (string, error) {
 	log.Printf("KeyPressNode task starting - Data: %+v", task.Data)
 
-	// Handlers cannot return an error, so every failure is reported the same way
-	// the other actions_*.go handlers report theirs.
-	fail := func(err error) {
+	// Reported to the frontend as well as returned, and by the same value, so the
+	// status panel and the caller cannot be told different things.
+	fail := func(err error) error {
 		log.Printf("KeyPressNode error: %s for task %s", err, task.ID)
 		app.emitEvent("task-error", map[string]interface{}{
 			"taskID": task.ID,
 			"error":  err.Error(),
 		})
+		return err
 	}
 
 	cfg, err := parseKeyPressConfig(task.Data)
 	if err != nil {
-		fail(err)
-		return
+		return "", fail(err)
 	}
 
 	succeed := func() {
@@ -451,11 +582,6 @@ func executeKeyPressTask(task Task, app *App) {
 		})
 	}
 
-	// Capture this run's context before anything that waits: it is the
-	// generation the worker running us belongs to, so Stop's cancel cuts the
-	// hold short and Stop's wg.Wait is never held up by it.
-	ctx := app.taskQueue.Context()
-
 	key := cfg.namedKey
 	modifiers := cfg.modifiers
 
@@ -463,10 +589,9 @@ func executeKeyPressTask(task Task, app *App) {
 		resolvedKey, layoutModifiers, ok, reason := resolveCharacterKey(cfg.character)
 		if !ok {
 			if cfg.action != keyActionPress || len(cfg.modifiers) > 0 {
-				fail(fmt.Errorf(
+				return "", fail(fmt.Errorf(
 					"cannot send %q as a keystroke: %s. A plain Press with no modifiers can still type it",
 					string(cfg.character), reason))
-				return
 			}
 
 			// robotgo.UnicodeType sends the character itself rather than a key:
@@ -478,7 +603,7 @@ func executeKeyPressTask(task Task, app *App) {
 			log.Printf("Typing %q directly rather than as a key: %s", string(cfg.character), reason)
 			robotgo.UnicodeType(uint32(cfg.character))
 			succeed()
-			return
+			return "", nil
 		}
 
 		key = resolvedKey
@@ -487,18 +612,20 @@ func executeKeyPressTask(task Task, app *App) {
 			string(cfg.character), describeCombo(resolvedKey, layoutModifiers))
 	}
 
-	canceled, err := sendKeystroke(ctx, cfg.action, key, modifiers, cfg.duration)
+	canceled, err := sendKeystroke(ctx, state, cfg.action, key, modifiers, cfg.duration)
 	if err != nil {
-		fail(err)
-		return
+		return "", fail(err)
 	}
 	if canceled {
 		// The user pressed Stop (or the run was torn down). Return without an
-		// error event: StopExecution already reports the stop, and the worker
-		// must be free to exit.
+		// error event: the run reports its own ending once it stops walking,
+		// and the walk must be free to return. And without an error - cancellation is the run
+		// ending rather than this node failing, and the caller holds the context
+		// that says so.
 		log.Printf("KeyPressNode hold canceled for task %s", task.ID)
-		return
+		return "", nil
 	}
 
 	succeed()
+	return "", nil
 }

@@ -52,7 +52,7 @@ func Run(assets embed.FS, appIcon []byte) error {
 	})
 
 	// Hide rather than close. Cancelling the event is what keeps the process -
-	// and with it the task queue and every registered hotkey - alive.
+	// and with it the runner and every registered hotkey - alive.
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		window.Hide()
 		e.Cancel()

@@ -205,10 +205,25 @@ func (t *tray) setExecuting(running bool) {
 // A dialog rather than an event, because both callers work with the window
 // closed: an event would go to a frontend nobody can see, and the user would
 // be left pressing a hotkey that silently does nothing.
+//
+// No dialog is raised while the app is shutting down. There is no session left
+// to report to - the window and the tray are being destroyed on the main thread
+// while this runs - and Dialog.Show marshals to that thread, so a dialog raised
+// here is at best modal over an app that is going away and at worst a goroutine
+// parked forever on a message loop that has already stopped pumping. Logged and
+// dropped instead.
+//
+// The test is the runner's state, not the error's identity, because shutdown is
+// not the only refusal reachable at that moment: a hotkey that fires while a
+// macro is running and the user quits is refused with "execution already in
+// progress", which deserves its dialog in every other circumstance and must not
+// get one here. Closed() covers errRunnerClosed by construction - that error is
+// only ever returned when the runner is closed - so this reads as the one
+// question that matters: is there anything left to show a dialog to?
 func (a *App) runFromTray(id string) {
 	if err := a.RunMacro(id); err != nil {
 		log.Printf("runFromTray %q: %v", id, err)
-		if a.wails == nil {
+		if a.wails == nil || a.runner.Closed() {
 			return
 		}
 		a.wails.Dialog.Error().

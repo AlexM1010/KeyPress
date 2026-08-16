@@ -2,11 +2,26 @@
 //
 // The mouse handlers themselves drive the real cursor, so what is tested here
 // is the part that reads a saved node - which is where a macro actually goes
-// wrong, and the part that used to panic on anything it did not expect.
+// wrong, and the part that used to panic on anything it did not expect - plus
+// clickLoop, which was split out of executeMouseClickTask for exactly this
+// reason: it decides what a Stop part-way through a click node leaves behind,
+// and it can answer that without a mouse.
+//
+// The clickLoop tests run inside a testing/synctest bubble. Their pauses are
+// then on the fake clock, so a fifty-click node a second apart costs the suite
+// nothing, and "the loop was parked in a pause when the run stopped" is a fact
+// about the program rather than a race between the test and a real timer. See
+// newBubbleTestApp in execution_test.go for the bubble's two constraints; these
+// tests build no App at all, so only the leak check on the outer t applies.
 
 package backend
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"testing/synctest"
+	"time"
+)
 
 func TestNumberInReadsAJSONNumber(t *testing.T) {
 	// Everything numeric in a saved macro arrives as a float64, because that is
@@ -173,5 +188,148 @@ func TestReadMouseMoveSettingsFillsInWhatItCanAssume(t *testing.T) {
 	}
 	if settings.dragWhileMoving {
 		t.Fatal("dragWhileMoving defaulted to true - a macro that predates the field would drag")
+	}
+}
+
+func TestClickLoopClicksEveryTimeAndPausesBetween(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		count int
+		pause time.Duration
+		// wantElapsed is the wait the loop should have spent: one pause between
+		// each pair of clicks and none after the last. It is the assertion that
+		// says where the delay goes, which is otherwise invisible.
+		wantElapsed time.Duration
+	}{
+		{"a single click waits for nothing", 1, 100 * time.Millisecond, 0},
+		{"three clicks pause twice", 3, 100 * time.Millisecond, 200 * time.Millisecond},
+		{"fifty clicks pause forty-nine times", 50, time.Second, 49 * time.Second},
+		{"no delay configured is no delay taken", 4, 0, 0},
+		{"a count of zero clicks nothing", 0, time.Second, 0},
+		// The node's own input cannot produce this, but a hand-edited save file
+		// can, and `for i := 0; i < -1` is a loop that does not run rather than
+		// one that runs forever. Pinned so it stays that way.
+		{"a negative count is not a loop", -1, time.Second, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verifyNoLeaks(t)
+
+			synctest.Test(t, func(t *testing.T) {
+				want := tc.count
+				if want < 0 {
+					want = 0
+				}
+
+				start := time.Now()
+				clicks := 0
+				performed, completed := clickLoop(context.Background(), tc.count, tc.pause, func() bool {
+					clicks++
+					return true
+				})
+
+				if !completed {
+					t.Errorf("clickLoop reported an uncancelled run incomplete after %d clicks", performed)
+				}
+				if performed != want || clicks != want {
+					t.Errorf("performed = %d and the click ran %d times; want %d of each", performed, clicks, want)
+				}
+				if elapsed := time.Since(start); elapsed != tc.wantElapsed {
+					t.Errorf("the loop waited %v; want %v", elapsed, tc.wantElapsed)
+				}
+			})
+		})
+	}
+}
+
+func TestClickLoopStopsWhenTheRunDoes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		count int
+		pause time.Duration
+		// cancelAt is the index of the click that cancels the run as it runs.
+		// Negative cancels before the loop is entered at all.
+		cancelAt int
+		// cutShort makes that click report itself interrupted, as a
+		// press-and-hold does when waitInterruptible returns false. Without it
+		// the click completes and the loop discovers the cancellation on its
+		// way to the next one.
+		cutShort      bool
+		wantPerformed int
+	}{
+		{
+			// Stop landed before the task's first click, or while it waited on
+			// mouseMu.
+			// Not one click of it should reach the machine.
+			name:     "stopped before the first click",
+			count:    5,
+			pause:    100 * time.Millisecond,
+			cancelAt: -1,
+		},
+		{
+			name:          "stopped while parked in the pause between clicks",
+			count:         5,
+			pause:         100 * time.Millisecond,
+			cancelAt:      1,
+			wantPerformed: 2,
+		},
+		{
+			// The check at the top of each iteration, which is the only thing
+			// standing between a Stop and the remaining forty-eight clicks of a
+			// node with no delay: a zero pause never consults the context.
+			name:          "stopped mid-run with no delay to be interrupted",
+			count:         50,
+			pause:         0,
+			cancelAt:      1,
+			wantPerformed: 2,
+		},
+		{
+			name:          "stopped inside a press-and-hold",
+			count:         5,
+			pause:         100 * time.Millisecond,
+			cancelAt:      2,
+			cutShort:      true,
+			wantPerformed: 3,
+		},
+		{
+			// The case performed and completed are two answers for: every click
+			// the node asked for happened, and it still did not finish.
+			name:          "a hold cut short on the only click still reports incomplete",
+			count:         1,
+			pause:         100 * time.Millisecond,
+			cancelAt:      0,
+			cutShort:      true,
+			wantPerformed: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verifyNoLeaks(t)
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if tc.cancelAt < 0 {
+					cancel()
+				}
+
+				clicks := 0
+				performed, completed := clickLoop(ctx, tc.count, tc.pause, func() bool {
+					i := clicks
+					clicks++
+					if i != tc.cancelAt {
+						return true
+					}
+					cancel()
+					return !tc.cutShort
+				})
+
+				if completed {
+					t.Error("clickLoop reported a stopped run as complete")
+				}
+				if performed != tc.wantPerformed || clicks != tc.wantPerformed {
+					t.Errorf("performed = %d and the click ran %d times; want %d of each",
+						performed, clicks, tc.wantPerformed)
+				}
+			})
+		})
 	}
 }

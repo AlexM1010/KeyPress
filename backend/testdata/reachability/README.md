@@ -9,11 +9,18 @@ Graphs, and the set of nodes a run can actually get to in each one.
 - `frontend/src/lib/utils/nodeLabels.parity.test.ts`, which runs the TypeScript
   walk exported from `nodeLabels.ts` over the same files.
 
-They exist because the walk is implemented twice - once in Go to decide which
-nodes run, once in TypeScript to decide how the status panel names and orders
+They exist because the walk is implemented twice - once in Go to lint the graph
+before a run, once in TypeScript to decide how the status panel names and orders
 them. If the two ever disagree, the panel describes a run that did not happen:
-it names the wrong nodes as skipped, or sorts a stall report wrongly. Nothing
-else asserts they agree.
+it names the wrong nodes as skipped, or numbers them in an order the run does not
+follow. Nothing else asserts they agree.
+
+Reachability is not runnability, and neither of these walks is the engine's. A
+node is reached here if any path leads to it; whether the execution token ever
+arrives, and how often, is `backend/interpreter.go`'s answer and the sibling
+fixtures in `../walk` are what pin it. This one expands each node once, so a
+cycle terminates it - the engine's walk goes round that cycle for as long as the
+user lets it, which is a macro rather than a fault.
 
 **Dropping a new `*.json` file in here extends both suites.** Neither test
 enumerates the fixtures by name; both glob the directory. Nothing to edit.

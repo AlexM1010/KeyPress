@@ -1,0 +1,26 @@
+{
+  "description": "The same branch with the condition not holding leaves by \"false\", and the run continues down that side alone. \"false\" is an output like any other, not the absence of one.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "branch",
+        "type": "BranchNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "variable": "attempts", "operator": "greaterThan", "value": 3 }
+      },
+      { "id": "on-true", "type": "MouseClickNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "on-false", "type": "KeyPressNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "after-false", "type": "DelayNode", "position": { "x": 600, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "branch", "sourceHandle": "right" },
+      { "id": "e2", "source": "branch", "target": "on-true", "sourceHandle": "true" },
+      { "id": "e3", "source": "branch", "target": "on-false", "sourceHandle": "false" },
+      { "id": "e4", "source": "on-false", "target": "after-false", "sourceHandle": "right" }
+    ]
+  },
+  "outputs": { "branch": "false" },
+  "visits": ["start", "branch", "on-false", "after-false"],
+  "multipath": []
+}

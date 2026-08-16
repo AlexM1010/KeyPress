@@ -1,0 +1,21 @@
+{
+  "description": "A node that leaves by a named output takes the one edge on that handle and no other. The output it does not take is never walked, so nothing behind it runs.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "branch", "type": "ColorPickerNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "found", "type": "MouseClickNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "timed-out", "type": "DelayNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "after-timeout", "type": "DelayNode", "position": { "x": 600, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "branch", "sourceHandle": "right" },
+      { "id": "e2", "source": "branch", "target": "found", "sourceHandle": "out-found" },
+      { "id": "e3", "source": "branch", "target": "timed-out", "sourceHandle": "out-timeout" },
+      { "id": "e4", "source": "timed-out", "target": "after-timeout", "sourceHandle": "right" }
+    ]
+  },
+  "outputs": { "branch": "out-timeout" },
+  "visits": ["start", "branch", "timed-out", "after-timeout"],
+  "multipath": []
+}

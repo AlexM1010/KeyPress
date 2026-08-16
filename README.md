@@ -37,7 +37,7 @@ The application implements a hybrid architecture with clear separation of concer
                │ (Bindings + Events)
 ┌──────────────┴──────────────────────────┐
 │         Backend (Go)                    │
-│  - Task Queue System                    │
+│  - Macro Run Lifecycle (Runner)         │
 │  - Automation Execution Engine          │
 │  - File Persistence (XDG)               │
 │  - System Integration (robotgo)         │
@@ -47,8 +47,8 @@ The application implements a hybrid architecture with clear separation of concer
 ### Key Design Patterns
 
 **Backend**
-- Worker pool pattern with goroutines for concurrent task execution
-- Dependency graph resolution for task ordering
+- One goroutine per run, walking the flowchart a node at a time
+- Execution order decided by the edges the token follows, in output-handle order
 - Event-driven architecture for real-time frontend updates
 - Context-based cancellation for graceful shutdown
 
@@ -85,8 +85,10 @@ The application implements a hybrid architecture with clear separation of concer
 - Random delays within min/max range for human-like behavior
 
 ### Execution Engine
-- Concurrent task execution with worker pool (3 workers default)
-- Automatic dependency resolution based on flow connections
+- A single execution token walking the flowchart, depth-first
+- Fan-out through an explicit Sequence node, in output-handle order
+- Loops through a Loop Start / Loop End pair, which may run forever by design;
+  the hotkey that started the macro stops it
 - Real-time status updates via event system
 - Graceful error handling and recovery
 
@@ -186,36 +188,68 @@ npm run check      # Type checking
 
 ## Implementation Details
 
-### Task Queue System
+### The interpreter
 
-The execution engine uses a buffered channel-based task queue with a configurable worker pool:
+A run is one goroutine holding an execution token. It runs the node the token is
+on, asks the handler which output to leave by, and pushes the matching edges'
+targets onto a stack - so the first branch's whole subtree runs before the second
+branch starts:
 
 ```go
-type TaskQueue struct {
-    tasks   chan Task
-    wg      sync.WaitGroup
-    ctx     context.Context
-    cancel  context.CancelFunc
+type run struct {
+    nodes      map[string]Node
+    successors map[string][]Edge // by source, in output-handle order
+    stack      []string          // pending nodes, top last
+    state      *runState         // per-run scratchpad, discarded with the run
+    frames     []*loopFrame      // Loop Starts the token is inside, outermost first
+    steps      int               // what the run reports having done; bounds nothing
+    outcome    runOutcome
 }
 ```
 
-Workers process tasks concurrently while respecting dependency constraints defined by flow connections.
+A node runs whenever the token arrives at it, so a node on two paths runs twice
+and a loop is an edge pointing backwards.
 
-### Dependency Resolution
+Nothing bounds how long a run may last, because a loop with neither a count nor
+an until-condition is a supported construct rather than a mistake. What is
+bounded is the *rate*: `minLoopIterationYield` gives a turn back once per loop
+iteration, and `maxWalkWithoutYield` is a wall-clock backstop for a cycle the
+loop node does not govern - a back edge drawn by hand, or a Loop Start that
+always leaves by `done`. Cancellation is checked between every node, so a stop
+lands promptly whatever the macro is doing.
 
-The application builds a dependency graph from flow edges and ensures tasks execute only when all dependencies are met:
+`stack` is bounded by the graph rather than by the run's length: an iteration is
+a scope, so `enterLoop` truncates back to the depth the iteration began at and a
+loop leaves nothing of itself pending.
 
-```go
-dependencies map[string][]string  // source -> targets
-completed    map[string]bool      // track completion
-```
+### Run lifecycle
+
+`Runner` (`backend/runner.go`) owns the generation token, the context that goes
+with it and the WaitGroup a stop waits on. `Go` launches the walk into a named
+generation and refuses a stale token; `Stop` cancels the generation, waits for
+the walk to return, and installs a fresh one, so the next macro runs exactly as
+the first did.
+
+`Close` is the shutdown counterpart: it cancels and waits exactly as `Stop`
+does, then leaves the runner **closed** rather than startable, so a global
+hotkey or a tray click arriving while the app tears itself down is refused
+instead of beginning a run nothing is left to stop. `ServiceShutdown` calls it,
+and calls nothing else: releasing the global shortcuts there as well looked like
+useful defence in depth and was neither. Wails has already released them by that
+point, and `unregisterHotkeys` held `hotkeyMux` across a main-thread marshal
+while `ServiceShutdown` itself runs *on* the main thread - which deadlocked the
+app at quit. `hotkeyMux` may be held across a marshal, so it must never be taken
+from the main thread; `execMutex` may, because nothing it is held across
+marshals.
 
 ### Event System
 
 Backend emits events that frontend listens to for real-time updates:
-- `task-started`, `task-completed`, `task-error`
-- `execution-completed`, `execution-stopped`, `execution-stalled`,
-  `execution-nodes-skipped`, `execution-error`
+- `task-started`, `task-completed`, `task-error`, `task-success`
+- `execution-completed`, `execution-stopped`, `execution-error`
+- `execution-nodes-skipped` - wired-up nodes with no path from Start
+- `execution-nodes-multipath` - nodes reachable by more than one path, which
+  therefore run more than once
 - `save-success`
 - `macro-started` - a run begun from the tray or a hotkey rather than from the
   canvas, carrying the macro's id and name so the workspace does not mistake

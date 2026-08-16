@@ -94,6 +94,14 @@ html {
 	--node-glow-indigo-light: rgba(79, 70, 229, 0.45); /* indigo-600 */
 	--node-glow-indigo-dark: rgba(129, 140, 248, 0.55); /* indigo-400 */
 
+	--node-glow-purple-light: rgba(147, 51, 234, 0.45); /* purple-600 */
+	--node-glow-purple-dark: rgba(192, 132, 252, 0.55); /* purple-400 */
+
+	/* Both halves of a Loop, which share a header gradient because they are one
+	   construct the editor creates, deletes and duplicates together. */
+	--node-glow-teal-light: rgba(13, 148, 136, 0.45); /* teal-600 */
+	--node-glow-teal-dark: rgba(45, 212, 191, 0.55); /* teal-400 */
+
 	/* For a node type with no colour of its own here - one added to the app
 	   without being added to the table in `Flow.svelte`. Neutral on purpose: it
 	   should read as "running" without claiming to be any node's colour. */
@@ -185,6 +193,8 @@ body {
 	--node-glow-green: var(--node-glow-green-dark);
 	--node-glow-orange: var(--node-glow-orange-dark);
 	--node-glow-indigo: var(--node-glow-indigo-dark);
+	--node-glow-purple: var(--node-glow-purple-dark);
+	--node-glow-teal: var(--node-glow-teal-dark);
 	--node-glow-neutral: var(--node-glow-neutral-dark);
 }
 
@@ -233,6 +243,8 @@ body {
 	--node-glow-green: var(--node-glow-green-light);
 	--node-glow-orange: var(--node-glow-orange-light);
 	--node-glow-indigo: var(--node-glow-indigo-light);
+	--node-glow-purple: var(--node-glow-purple-light);
+	--node-glow-teal: var(--node-glow-teal-light);
 	--node-glow-neutral: var(--node-glow-neutral-light);
 }
 

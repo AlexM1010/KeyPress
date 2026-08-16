@@ -1,0 +1,26 @@
+{
+  "description": "A Wait For Color node whose colour never appeared leaves by its \"timeout\" handle when the macro drew one, so the fallback runs and the branch behind the match output does not. A handled timeout is a branch, not a failure.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "wait",
+        "type": "ColorPickerNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "color": "#00ff00", "x": 100, "y": 100, "timeoutMs": 5000, "storeResultAs": "found" }
+      },
+      { "id": "on-match", "type": "MouseClickNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "on-timeout", "type": "KeyPressNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "after-timeout", "type": "DelayNode", "position": { "x": 600, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "wait", "sourceHandle": "right" },
+      { "id": "e2", "source": "wait", "target": "on-match", "sourceHandle": "right" },
+      { "id": "e3", "source": "wait", "target": "on-timeout", "sourceHandle": "timeout" },
+      { "id": "e4", "source": "on-timeout", "target": "after-timeout", "sourceHandle": "right" }
+    ]
+  },
+  "outputs": { "wait": "timeout" },
+  "visits": ["start", "wait", "on-timeout", "after-timeout"],
+  "multipath": []
+}

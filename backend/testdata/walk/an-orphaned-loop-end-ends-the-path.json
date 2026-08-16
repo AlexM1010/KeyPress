@@ -1,0 +1,36 @@
+{
+  "description": "A Loop End whose partner has been deleted - here one left downstream of a finished loop, still carrying the `loopId` of a Loop Start that is no longer in the file. Its `back` handle has no edge, so it ends that path exactly like any other unwired output: no panic, no error, and the run finishes normally. The editor refuses to leave half a pair behind; the walk does not depend on that having worked, and it never looks the partner up.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "loop",
+        "type": "LoopStartNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "count": 1, "loopId": "loop-1" }
+      },
+      { "id": "body", "type": "MouseClickNode", "position": { "x": 400, "y": 0 }, "data": {} },
+      {
+        "id": "end",
+        "type": "LoopEndNode",
+        "position": { "x": 600, "y": 0 },
+        "data": { "loopId": "loop-1" }
+      },
+      {
+        "id": "orphan",
+        "type": "LoopEndNode",
+        "position": { "x": 200, "y": 200 },
+        "data": { "loopId": "a-loop-start-that-was-deleted" }
+      }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "loop", "sourceHandle": "right" },
+      { "id": "e2", "source": "loop", "target": "body", "sourceHandle": "body" },
+      { "id": "e3", "source": "body", "target": "end", "sourceHandle": "right" },
+      { "id": "e4", "source": "end", "target": "loop", "sourceHandle": "back" },
+      { "id": "e5", "source": "loop", "target": "orphan", "sourceHandle": "done" }
+    ]
+  },
+  "visits": ["start", "loop", "body", "end", "loop", "orphan"],
+  "multipath": []
+}

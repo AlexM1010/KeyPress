@@ -1,0 +1,21 @@
+{
+  "description": "Two branches of a Sequence node meet again at a join, so the token arrives at the join twice and runs it twice. The lint names it: two unrelated branches joining into one node is the accident it exists to report.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "seq", "type": "SequenceNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "upper", "type": "DelayNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "lower", "type": "DelayNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "join", "type": "MouseClickNode", "position": { "x": 600, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "seq", "sourceHandle": "right" },
+      { "id": "e2", "source": "seq", "target": "upper", "sourceHandle": "out-1" },
+      { "id": "e3", "source": "seq", "target": "lower", "sourceHandle": "out-2" },
+      { "id": "e4", "source": "upper", "target": "join", "sourceHandle": "right" },
+      { "id": "e5", "source": "lower", "target": "join", "sourceHandle": "right" }
+    ]
+  },
+  "visits": ["start", "seq", "upper", "join", "lower", "join"],
+  "multipath": ["join"]
+}

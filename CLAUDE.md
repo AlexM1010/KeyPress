@@ -113,10 +113,27 @@ leave the macro clean. That function includes only the fields the Go `FlowData`
 persists - selection and drag state are Svelte Flow's bookkeeping, and
 including any of it would have clicking a node report unsaved changes.
 
-## Two implementations of one walk
+## The macro is walked, and the walk is described twice
 
-Reachability from the Start node is implemented twice: `reachableFrom` in
-`backend/execution.go` decides which nodes run, and the walk in
-`frontend/src/lib/utils/nodeLabels.ts` decides how the status panel names and
-orders them. Nothing but the shared fixtures in `backend/testdata/reachability/`
-keeps them agreeing - see the README there before changing either.
+`backend/interpreter.go` runs a macro with a single execution token: it runs the
+node the token is on, asks that node which output to leave by, and follows the
+matching edges depth-first. A node runs **on arrival**, so a node on two paths
+runs twice and a loop is nothing but an edge pointing backwards. Two rules of it
+are load-bearing and easy to get wrong:
+
+- A handler returning `next == ""` means "the only output", and takes **every**
+  outgoing edge, in ascending `sourceHandle` order. It does *not* mean "the edges
+  whose handle is empty" - every edge the app draws carries `sourceHandle:
+  'right'`, so a handle-equality rule would strand every macro at the Start node.
+- An output handle takes **exactly one** edge; fan-out is an explicit Sequence
+  node. `startFlow` refuses a flowchart that breaks that, before anything runs.
+
+`reachableFrom` in `backend/execution.go` no longer decides what runs - the token
+simply never arrives at an unreachable node - and is now purely a lint: it is
+what tells the user which wired-up nodes will never run.
+
+Both of those are described a second time in
+`frontend/src/lib/utils/nodeLabels.ts`, which decides how the status panel names
+and orders nodes. Nothing but the shared fixtures in
+`backend/testdata/reachability/` and `backend/testdata/walk/` keeps the two
+agreeing - see the READMEs there before changing either side.

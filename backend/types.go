@@ -5,6 +5,8 @@
 
 package backend
 
+import "slices"
+
 // Node represents a single node in the flowchart.
 type Node struct {
 	ID       string                 `json:"id"`
@@ -78,4 +80,37 @@ type Task struct {
 	ID   string
 	Type string
 	Data map[string]interface{}
+
+	// WiredOutputs are the source handles this node has an outgoing edge on,
+	// sorted and without repeats. The walk fills it in when it builds the task
+	// (run.task in interpreter.go); it is not part of the saved macro, and a
+	// Task built by hand has none.
+	//
+	// It exists because some outputs are conditional on the graph rather than
+	// on the payload. A Wait For Color node treats a timeout as a handled
+	// branch when a `timeout` edge is drawn from it and as a failure when one is
+	// not, and it cannot tell which without knowing what is wired to it. It is a
+	// list of handles rather than a bool named after that one output so that the
+	// next node with a graph-conditional output needs nothing added here - and a
+	// Loop Start is the second such node, leaving by `done` when nothing is
+	// wired to its `body`. The loop's other two degradations need no help from
+	// it: an unwired `done`, and a Loop End whose `back` edge has been deleted,
+	// end that path exactly like any other unwired output.
+	WiredOutputs []string
+
+	// Loop is the Loop Start node's iteration frame, and nil for every other
+	// node type, the paired Loop End included: the end runs nothing and counts
+	// nothing. The walk enters the frame when the token arrives and puts it here
+	// (run.step), for the same reason WiredOutputs is filled in there: it is a
+	// fact about the walk rather than about the node, and a handler has no way
+	// to know it.
+	//
+	// It is a pointer because the handler counts through it - the iteration it
+	// records has to be the one the walk's stack is keeping.
+	Loop *loopFrame
+}
+
+// hasWiredOutput reports whether an edge leaves this node by the named handle.
+func (t Task) hasWiredOutput(handle string) bool {
+	return slices.Contains(t.WiredOutputs, handle)
 }
