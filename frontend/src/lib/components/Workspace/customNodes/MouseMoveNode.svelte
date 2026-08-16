@@ -43,6 +43,19 @@
 		};
 		pathType: PathType;
 		customPath: Coordinates[];
+		/**
+		 * The name to remember where the move ended under, if the macro asked for
+		 * one. Optional in the type as well as on screen, and that is the contract
+		 * rather than a convenience: a name that was never given has to be *absent*
+		 * from the payload, because the run state's "unset" is what a later Branch
+		 * node's `isSet` operator asks about. Writing `""` here would be writing
+		 * down a name the user did not choose.
+		 *
+		 * One name, two entries: the backend stores `<name>.x` and `<name>.y` as
+		 * numbers, since the run state holds one value per name and a position is
+		 * two of them. The card says so - see the hint under the box.
+		 */
+		storeResultAs?: string;
 	};
 
 	// Props.
@@ -129,6 +142,45 @@
 		if (data.pathType == null) data.pathType = 'Straight';
 		if (data.customPath == null) data.customPath = [];
 	}
+
+	// The "store result as" box is bound to a local of its own rather than
+	// straight to `data.storeResultAs`, so that a cleared box can *remove* the
+	// field instead of setting it to `""`. `bind:value` has no way to express
+	// that, and the difference is the whole point of the field: a name that was
+	// never stored is unset, which is what `isSet` distinguishes. It is also what
+	// the hint below is derived from, so the two names the run will actually write
+	// track what is in the box rather than what has reached the payload.
+	let storeResultAs: string = data.storeResultAs ?? '';
+
+	/** The name as it will be looked up: trimmed, and empty when there is none. */
+	$: resultName = storeResultAs.trim();
+
+	/**
+	 * Copies the box into the payload, or takes the field back out when it is
+	 * blank.
+	 *
+	 * Called from a reactive statement naming only `storeResultAs`, so it runs
+	 * when the box changes and not when anything else in `data` does - the reads
+	 * and writes of `data` are inside the function, where Svelte 4's dependency
+	 * tracking does not look. That matters more here than elsewhere: this node
+	 * already backfills from a reactive block that writes `data`, and a second
+	 * block depending on `data` and writing it would be two blocks waking each
+	 * other up.
+	 *
+	 * Whitespace is trimmed for the emptiness test only, not for what is stored:
+	 * the backend trims a name on both sides of the exchange, so a name typed with
+	 * a trailing space still finds its value, and echoing the user's own spelling
+	 * back is less startling than silently editing it.
+	 */
+	function syncStoreResultAs(name: string) {
+		if (name.trim() === '') {
+			if ('storeResultAs' in data) delete data.storeResultAs;
+		} else if (data.storeResultAs !== name) {
+			data.storeResultAs = name;
+		}
+	}
+
+	$: syncStoreResultAs(storeResultAs);
 
 	// Local UI state
 	let showMovementSettings = false;
@@ -250,6 +302,36 @@
 			{/if}
 		</div>
 
+		<!-- Remembering where the move ended, for a later Branch node -->
+		<div class="grid gap-1.5">
+			<label class="move-label" for="store-result-{id}">Store result as</label>
+			<input
+				id="store-result-{id}"
+				type="text"
+				autocomplete="off"
+				spellcheck="false"
+				placeholder="Leave blank to store nothing"
+				bind:value={storeResultAs}
+				class="move-input"
+			/>
+			<!-- The convention spelled out with the user's own name in it. A
+			     position is two numbers and the run state holds one value per
+			     name, so a name typed here becomes two - and someone who typed
+			     `spot` and then wrote a condition on `spot` would be reading a
+			     name nothing ever wrote to. -->
+			{#if resultName}
+				<p class="move-help">
+					Writes two numbers: <code>{resultName}.x</code> and <code>{resultName}.y</code>. A Branch
+					reads one of those, not <code>{resultName}</code>.
+				</p>
+			{:else}
+				<p class="move-help">
+					A name here is stored as two numbers, <code>&lt;name&gt;.x</code> and
+					<code>&lt;name&gt;.y</code> - a Branch condition reads one of those.
+				</p>
+			{/if}
+		</div>
+
 		<!-- Advanced Movement Settings -->
 		<div class="border-t pt-2" style="border-color: var(--secondary-text);">
 			<button
@@ -332,3 +414,45 @@
 		</div>
 	</div>
 </NodeWrapper>
+
+<style>
+	.move-label {
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--main-text);
+	}
+
+	/* Themed like the shared number and select inputs rather than left to the
+	   browser's default, since a node sits on a translucent card that is dark
+	   under the dark theme. */
+	.move-input {
+		width: 100%;
+		height: 2rem;
+		padding: 0 0.5rem;
+		border-radius: 0.375rem;
+		border: 1px solid var(--border);
+		background-color: var(--main);
+		color: var(--main-text);
+		font-size: 0.8rem;
+		transition: background-color 0.3s;
+	}
+
+	.move-input:hover {
+		background-color: var(--main-hover);
+	}
+
+	.move-input:focus {
+		outline: none;
+	}
+
+	.move-help {
+		font-size: 0.7rem;
+		line-height: 1.1rem;
+		color: var(--main-text);
+		opacity: 0.75;
+	}
+
+	.move-help code {
+		font-family: monospace;
+	}
+</style>

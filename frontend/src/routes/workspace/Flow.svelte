@@ -10,7 +10,7 @@
 		ConnectionMode,
 		useSvelteFlow
 	} from '@xyflow/svelte';
-	import type { DefaultEdgeOptions, Edge } from '@xyflow/svelte';
+	import type { Connection, DefaultEdgeOptions, Edge } from '@xyflow/svelte';
 
 	// Import custom nodes, edges, and utilities
 	import {
@@ -25,6 +25,10 @@
 		markMacroSaved,
 		serializeMacro,
 		duplicateNodes,
+		isOutputHandleFree,
+		createLoopPair,
+		withLoopPartners,
+		LOOP_START_NODE_TYPE,
 		type FlowNode
 	} from '$lib/stores/flow.svelte';
 	import { onLayout } from '$lib/utils/autoLayout';
@@ -171,6 +175,14 @@
 			y: event.clientY
 		});
 
+		// A loop is two nodes and an edge, and the palette offers it as one entry -
+		// so the drop is served by the store rather than by the generic path below.
+		// The user never draws the back edge; see `createLoopPair`.
+		if (type === LOOP_START_NODE_TYPE) {
+			createLoopPair(position);
+			return;
+		}
+
 		// The payload starts empty on purpose. Each node component backfills its
 		// own defaults into the object Svelte Flow hands it, and none of them
 		// renders a `label` - every node takes its title from its own props - so
@@ -226,9 +238,12 @@
 	// never a marker written onto the node objects, so the graph the user saves
 	// is untouched.
 	//
-	// A list rather than a single id because the run is concurrent - the worker
-	// pool in `taskqueue.go` runs several tasks at once, so two branches of a
-	// flow really can be lit at the same time, and that is worth seeing.
+	// A list, although the interpreter runs exactly one node at a time - a single
+	// execution token walks the graph, so `task-started` and `task-completed`
+	// strictly alternate and this can only ever hold one id. It is a leftover of
+	// the old concurrent scheduler, kept because the shape costs nothing and the
+	// stylesheet builder takes a list either way. If a future engine ever lights
+	// two branches at once, nothing here has to change.
 	let activeNodeIds = $state<string[]>([]);
 
 	/**
@@ -344,6 +359,43 @@
 		data: { color: 'var(--main-text)' },
 		interactionWidth: 20
 	};
+
+	/**
+	 * Refuses a second wire out of an execution output, while the user is still
+	 * dragging it.
+	 *
+	 * The rule itself - one edge per output handle, any number into a target -
+	 * lives in `isOutputHandleFree`, next to the graph it reads and the function
+	 * that removes those edges again; see there for why the model needs it.
+	 *
+	 * `isValidConnection` rather than `onconnect`, because it is consulted during
+	 * the drag: Svelte Flow 1.6 threads this prop from the flow through the store
+	 * into every `<Handle>` (`Handle.svelte` reads `store.isValidConnection`),
+	 * which paints the handles it would refuse and declines the drop.
+	 * `onconnect` fires only once an edge has been added, so the feedback would
+	 * be an edge appearing and then vanishing.
+	 */
+	function isValidConnection(connection: Edge | Connection): boolean {
+		return isOutputHandleFree(connection.source, connection.sourceHandle);
+	}
+
+	/**
+	 * Widens a deletion to whole loops, so half a pair can never be left behind.
+	 *
+	 * `onbeforedelete` is the single choke point every deletion goes through -
+	 * Backspace, the bin on a node's hover menu, and the selection toolbar all end
+	 * up in `deleteElements`, which consults this hook and then filters the arrays
+	 * by what it returns. The rule itself is `withLoopPartners`, next to the graph
+	 * it reads and the function that created the pair in the first place.
+	 *
+	 * Async because the hook's contract is a promise; there is nothing to await.
+	 */
+	async function onBeforeDelete({ nodes, edges }: { nodes: FlowNode[]; edges: Edge[] }) {
+		return withLoopPartners(
+			nodes.map((node) => node.id),
+			edges.map((edge) => edge.id)
+		);
+	}
 
 	// Function to handle running the entire flow
 	async function handleRunFlow() {
@@ -883,24 +935,35 @@
 			})
 		);
 
-		// The run reached a point where nothing was left running and nothing more
-		// could ever start - a loop in the connections, in practice.
+		// Nodes the run can reach by more than one path, and so will execute more
+		// than once. A lint rather than a failure: the run carries on, and it is
+		// reported as a warning because a diamond is far more often a drawing
+		// mistake than a deliberate "do this twice".
+		//
+		// Named through the same `inFlowOrder(...).map(nodeLabel)` as the skipped
+		// nodes above, so both warnings read in the order the flow runs them.
 		eventUnsubscribers.push(
-			Events.On('execution-stalled', ({ data }) => {
+			Events.On('execution-nodes-multipath', ({ data }) => {
 				const nodeIds = data as string[];
-				isExecuting = false;
-				clearActiveNodes();
-				const stuck = inFlowOrder(nodeIds).map(nodeLabel);
 				addStatusMessage({
-					id: `exec-stalled-${Date.now()}`,
-					type: 'error',
+					id: `exec-multipath-${Date.now()}`,
+					type: 'warning',
 					message:
-						`Flow stopped - ${stuck.join(', ')} could never run.` +
-						' Check the connections for a loop.'
+						`${nodeIds.length} ${nodeIds.length === 1 ? 'node is' : 'nodes are'} reachable by` +
+						' more than one path and will run more than once:' +
+						` ${inFlowOrder(nodeIds).map(nodeLabel).join(', ')}`
 				});
 			})
 		);
 
+		// No "execution-budget-exceeded" listener. There used to be one: a run-wide
+		// budget stopped a walk after 100000 node executions, and this reported the
+		// node the token was on when it ran out. Phase 4 removed the budget, because
+		// a loop with no count and no condition is a feature - "click until I say
+		// stop" is the macro this app exists for - and a budget is exactly what
+		// would stop it after a few hours. What bounds a runaway loop now is the
+		// per-iteration yield in `actions_loop.go`, which is a rate rather than a
+		// total, and the hotkey that stops the run.
 		eventUnsubscribers.push(
 			Events.On('execution-completed', () => {
 				isExecuting = false;
@@ -1159,6 +1222,8 @@
 			{edgeTypes}
 			{colorMode}
 			connectionMode={ConnectionMode.Loose}
+			{isValidConnection}
+			onbeforedelete={onBeforeDelete}
 			{defaultEdgeOptions}
 			connectionLineComponent={ConnectionLine}
 			ondragover={onDragOver}

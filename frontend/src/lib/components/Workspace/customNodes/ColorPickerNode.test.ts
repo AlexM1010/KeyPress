@@ -16,7 +16,33 @@ type ColorPickerNodeData = {
 	y: number;
 	tolerance: number;
 	timeoutMs: number;
+	storeResultAs?: string;
 };
+
+/** A complete payload, so a test can vary one field without restating five. */
+const savedPayload = (overrides: Partial<ColorPickerNodeData> = {}): ColorPickerNodeData => ({
+	color: '#00ff00',
+	x: 0,
+	y: 0,
+	tolerance: 10,
+	timeoutMs: 30000,
+	...overrides
+});
+
+/**
+ * The handle ids the node has actually rendered, in the order they appear.
+ *
+ * Read off the DOM rather than off the component's own array, because the DOM is
+ * what Svelte Flow attaches edges to: `<Handle>` renders `data-handleid`, and an
+ * edge's `sourceHandle` is that string - which is what the Go handler compares
+ * against `Task.WiredOutputs` to decide whether a timeout is handled.
+ */
+function handleIds(kind?: 'source' | 'target'): string[] {
+	const selector = kind ? `.svelte-flow__handle.${kind}` : '.svelte-flow__handle';
+	return [...document.querySelectorAll(selector)].map(
+		(handle) => handle.getAttribute('data-handleid') ?? ''
+	);
+}
 
 describe('ColorPickerNode', () => {
 	it('backfills newer fields into a payload saved before they existed', () => {
@@ -216,5 +242,75 @@ describe('ColorPickerNode', () => {
 		await fireEvent.input(screen.getByLabelText('Timeout'), { target: { value: '2' } });
 
 		expect(data.timeoutMs).toBe(120000);
+	});
+
+	it('offers a timeout output beside the match one, without renaming the match', () => {
+		renderNode(ColorPickerNode, savedPayload());
+
+		// `right` is load-bearing history: every edge this app has ever saved from
+		// this node carries that handle id, so the match keeps it and the new output
+		// is the one with a name of its own. Rename the match and every existing
+		// macro's edge leaves a handle that no longer exists.
+		expect(handleIds('source')).toEqual(['right', 'timeout']);
+		expect(handleIds('target')).toEqual(['left']);
+	});
+
+	it('stores nothing by default, rather than storing an empty name', () => {
+		const { data } = renderNode(ColorPickerNode, { color: '#ff0000' } as ColorPickerNodeData);
+
+		// The distinction the whole run state rests on: a name that was never given
+		// has to be *absent*, because "unset" is what a Branch node's `isSet` asks
+		// about. An empty string would be a name, and one nobody chose.
+		expect('storeResultAs' in data).toBe(false);
+		expect('storeResultAs' in persistedData(data, 'ColorPickerNode')).toBe(false);
+	});
+
+	it('writes a typed result name into the payload', async () => {
+		const { data } = renderNode(ColorPickerNode, savedPayload());
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), {
+			target: { value: 'matched' }
+		});
+
+		expect(data.storeResultAs).toBe('matched');
+		expect(persistedData(data, 'ColorPickerNode').storeResultAs).toBe('matched');
+	});
+
+	it('removes the result name when the box is cleared, rather than emptying it', async () => {
+		const { data } = renderNode(ColorPickerNode, savedPayload({ storeResultAs: 'matched' }));
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), { target: { value: '' } });
+
+		// `bind:value` alone cannot express this - it would write `""` - and `""` is
+		// exactly the value the field must never take: `resultName` in Go reads a
+		// blank name as "store nothing", so the payload would be carrying a name
+		// that means the absence of one.
+		expect('storeResultAs' in data).toBe(false);
+		expect('storeResultAs' in persistedData(data, 'ColorPickerNode')).toBe(false);
+	});
+
+	it('treats a name of nothing but spaces as no name at all', async () => {
+		const { data } = renderNode(ColorPickerNode, savedPayload({ storeResultAs: 'matched' }));
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), { target: { value: '   ' } });
+
+		expect('storeResultAs' in data).toBe(false);
+	});
+
+	it('leaves a saved result name alone through an unrelated edit', async () => {
+		const { data } = renderNode(ColorPickerNode, savedPayload({ storeResultAs: 'matched' }));
+
+		expect((screen.getByLabelText('Store result as') as HTMLInputElement).value).toBe('matched');
+
+		await fireEvent.input(screen.getByLabelText('Tolerance'), { target: { value: '32' } });
+
+		expect(persistedData(data, 'ColorPickerNode')).toEqual({
+			color: '#00ff00',
+			x: 0,
+			y: 0,
+			tolerance: 32,
+			timeoutMs: 30000,
+			storeResultAs: 'matched'
+		});
 	});
 });

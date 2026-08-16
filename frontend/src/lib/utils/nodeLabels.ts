@@ -12,11 +12,12 @@
  *
  * The values are copies of the node components' own `title` prop defaults
  * (`StartNode.svelte`, `DelayNode.svelte`, `MouseClickNode.svelte`,
- * `MouseMoveNode.svelte`, `ColorPickerNode.svelte`, `KeyPressNode.svelte`),
- * so the status panel calls a node exactly what the node's own header calls
- * it on the canvas. Those components are the source of truth: when one of
- * them renames itself, this table follows. A type missing from here still
- * gets a label - see `buildNodeLabels`.
+ * `MouseMoveNode.svelte`, `ColorPickerNode.svelte`, `KeyPressNode.svelte`,
+ * `SequenceNode.svelte`, `BranchNode.svelte`, `LoopStartNode.svelte`,
+ * `LoopEndNode.svelte`), so the status panel calls a node
+ * exactly what the node's own header calls it on the canvas. Those components are the source of
+ * truth: when one of them renames itself, this table follows. A type missing
+ * from here still gets a label - see `buildNodeLabels`.
  */
 export const NODE_TYPE_TITLES: Record<string, string> = {
 	StartNode: 'Start',
@@ -24,7 +25,11 @@ export const NODE_TYPE_TITLES: Record<string, string> = {
 	MouseClickNode: 'Mouse Click',
 	MouseMoveNode: 'Mouse Move',
 	ColorPickerNode: 'Wait For Color',
-	KeyPressNode: 'Keypress'
+	KeyPressNode: 'Keypress',
+	SequenceNode: 'Sequence',
+	BranchNode: 'Branch',
+	LoopStartNode: 'Loop Start',
+	LoopEndNode: 'Loop End'
 };
 
 /** Shown when a reported node is not in the graph the run was started from. */
@@ -43,12 +48,17 @@ export type LabellableNode = {
 
 /**
  * The subset of an edge this file needs. Structural for the same reason:
- * `toObject()` returns Svelte Flow's `Edge`, and only the direction matters
- * here.
+ * `toObject()` returns Svelte Flow's `Edge`, whose `sourceHandle` is `null`
+ * when the edge leaves a node's only output, and the Wails bindings type a Go
+ * slice as `T[] | null` - so both flavours of "no handle" have to be taken.
+ *
+ * `sourceHandle` is not decoration: it is which output an edge leaves by, and
+ * the walk below takes a node's outgoing edges in ascending order of it.
  */
 export type LabellableEdge = {
 	source: string;
 	target: string;
+	sourceHandle?: string | null;
 };
 
 /**
@@ -72,9 +82,12 @@ type FlowGraph = {
 	byId: Map<string, LabellableNode>;
 	/** The node the run begins at, absent if the flow has none. */
 	startId: string | undefined;
-	/** Forward adjacency: which nodes each node hands on to. */
+	/**
+	 * Forward adjacency: which nodes each node hands the token on to, already in
+	 * the order the token takes them - see `shapeGraph`.
+	 */
 	successors: Map<string, string[]>;
-	/** The same edges backwards: which nodes each node waits for. */
+	/** The same edges backwards: which nodes point at each node. */
 	predecessors: Map<string, string[]>;
 	/**
 	 * Every node that takes part in an edge, recorded before any edge is dropped
@@ -85,10 +98,37 @@ type FlowGraph = {
 };
 
 /**
+ * Compares two strings by code unit, which is what a plain ascending sort of a
+ * handle id means on the Go side (`sort.Strings` is bytewise). `localeCompare`
+ * is the reflex and the wrong call here - it folds case and ignores
+ * punctuation, so it would agree with the engine on `out-1` vs `out-2` and
+ * disagree on ids that differ only in the parts it smooths over.
+ */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
  * Shapes the raw nodes and edges into a `FlowGraph`, keeping only the edges
  * that actually join two nodes of this flow and dropping the ones pointing
- * *into* the Start node - which `StartExecution` enqueues unconditionally, so
- * they are not prerequisites and must not be read as any.
+ * *into* the Start node - which the run begins at unconditionally, so an edge
+ * back into it is a loop the walk has already been round, not a way in.
+ *
+ * Each node's outgoing edges come out **sorted by `sourceHandle` ascending,
+ * then by target id**, because that is the order the interpreter follows them
+ * in: a handler returning `""` means "the only output" and takes every outgoing
+ * edge in handle order. The target id is the tie-break for two edges leaving
+ * one handle - which the editor now refuses to draw, but a macro saved before
+ * that rule (or drawn through Svelte Flow's loose connection mode) can still
+ * hold, and the order of the two must not depend on which one happens to come
+ * first in the array.
+ *
+ * `sortedSuccessors` in `backend/interpreter.go` breaks that tie the same way,
+ * and did not always: it kept whatever order the file listed until a review
+ * caught the two walks disagreeing. Nothing a user can run reaches the case -
+ * `validateOutputHandles` refuses the graph before a run starts - but the walk
+ * fixtures in `backend/testdata/walk` are driven straight into `run.step`,
+ * bypassing that check, and both this suite and the Go one read them. A fixture
+ * with two edges on one handle is exactly the drift those shared fixtures exist
+ * to catch, so the two sides have to agree here even though no macro can.
  */
 function shapeGraph(nodes: LabellableNode[], edges: LabellableEdge[]): FlowGraph {
 	const byId = new Map<string, LabellableNode>();
@@ -96,55 +136,95 @@ function shapeGraph(nodes: LabellableNode[], edges: LabellableEdge[]): FlowGraph
 
 	const startId = nodes.find((node) => node.type === 'StartNode')?.id;
 
-	const successors = new Map<string, string[]>();
+	const outgoing = new Map<string, { handle: string; target: string }[]>();
 	const predecessors = new Map<string, string[]>();
 	const wired = new Set<string>();
-	const link = (map: Map<string, string[]>, from: string, to: string) => {
-		const list = map.get(from);
-		if (list) list.push(to);
-		else map.set(from, [to]);
-	};
 	for (const edge of edges) {
 		if (!byId.has(edge.source) || !byId.has(edge.target)) continue;
 		wired.add(edge.source);
 		wired.add(edge.target);
 		// The Start node runs regardless of what points at it.
 		if (edge.target === startId) continue;
-		link(successors, edge.source, edge.target);
-		link(predecessors, edge.target, edge.source);
+
+		const out = outgoing.get(edge.source);
+		// An unused handle is `null` on a Svelte Flow edge and `""` once
+		// `serializeMacro` has been through it; both mean "the only output".
+		const step = { handle: edge.sourceHandle ?? '', target: edge.target };
+		if (out) out.push(step);
+		else outgoing.set(edge.source, [step]);
+
+		const back = predecessors.get(edge.target);
+		if (back) back.push(edge.source);
+		else predecessors.set(edge.target, [edge.source]);
+	}
+
+	const successors = new Map<string, string[]>();
+	for (const [source, out] of outgoing) {
+		out.sort((a, b) => byCodeUnit(a.handle, b.handle) || byCodeUnit(a.target, b.target));
+		successors.set(
+			source,
+			out.map((step) => step.target)
+		);
 	}
 
 	return { byId, startId, successors, predecessors, wired };
 }
 
 /**
+ * The token's walk, from wherever it is put down: depth-first, outgoing edges
+ * taken in the order `shapeGraph` sorted them into, and each node expanded at
+ * most once so a cycle terminates the walk instead of spinning in it.
+ *
+ * Adds to `visited` in visit order, which is what makes a `Set` the return type
+ * of the two callers rather than merely their answer: insertion order is
+ * preserved, so the same object answers both "can the run reach this?" and "in
+ * what order?".
+ *
+ * `within`, when given, confines the walk to one group of nodes - used for the
+ * dead branches below, which are walked one weakly connected group at a time.
+ */
+function visitDepthFirst(
+	successors: Map<string, string[]>,
+	seeds: string[],
+	visited: Set<string>,
+	within?: Set<string>
+): void {
+	// An explicit stack rather than recursion: a saved macro's depth is the
+	// user's business, and a long chain of nodes should not be able to overflow
+	// the call stack of the thing that names them.
+	const stack = [...seeds].reverse();
+	while (stack.length > 0) {
+		const id = stack.pop() as string;
+		if (visited.has(id)) continue;
+		if (within !== undefined && !within.has(id)) continue;
+		visited.add(id);
+		const next = successors.get(id) ?? [];
+		// Pushed backwards so the first outgoing edge is the first one popped -
+		// depth-first in handle order, exactly as the interpreter follows them.
+		for (let i = next.length - 1; i >= 0; i--) stack.push(next[i]);
+	}
+}
+
+/**
  * What the run can get to, walked exactly like `reachableFrom` in
- * `backend/execution.go`: forwards from the Start node, each node expanded at
- * most once so a cycle terminates the walk instead of spinning in it, and edges
- * to ids that are not nodes of this flow ignored (`shapeGraph` has already
- * dropped those).
+ * `backend/execution.go`: forwards from the Start node, each node visited at
+ * most once, and edges to ids that are not nodes of this flow ignored
+ * (`shapeGraph` has already dropped those).
  *
  * "Exactly like" is asserted rather than hoped for. Both walks are run over the
  * shared fixtures in `backend/testdata/reachability` - see the README there -
  * by `nodeLabels.parity.test.ts` on this side and
  * `TestReachableFromAgreesWithTheSharedFixtures` on the Go side. If they ever
  * disagree the status panel starts describing a run that did not happen, naming
- * the wrong nodes as skipped or sorting a stall report wrongly, and those two
- * tests are what catches it.
+ * the wrong nodes as skipped, and those two tests are what catches it.
+ *
+ * The returned set is in visit order, so it doubles as the run's sequence.
  */
 function walkForwards({ startId, successors }: FlowGraph): Set<string> {
 	const reachable = new Set<string>();
 	if (startId === undefined) return reachable;
 
-	reachable.add(startId);
-	const queue = [startId];
-	for (let i = 0; i < queue.length; i++) {
-		for (const next of successors.get(queue[i]) ?? []) {
-			if (reachable.has(next)) continue;
-			reachable.add(next);
-			queue.push(next);
-		}
-	}
+	visitDepthFirst(successors, [startId], reachable);
 	return reachable;
 }
 
@@ -153,10 +233,10 @@ function walkForwards({ startId, successors }: FlowGraph): Set<string> {
  * answer to the question `reachableFrom` answers in Go.
  *
  * `buildNodeLabels` does not call this: it needs the shaped graph for its
- * ordering pass as well, so it shapes the flow once and walks it itself. Both
- * routes go through the same `shapeGraph` and `walkForwards`, so this function
- * cannot answer differently from the labelling - which is the point, since it
- * is what the parity test against the Go engine runs.
+ * dead-branch pass as well, so it shapes the flow once and walks it itself.
+ * Both routes go through the same `shapeGraph` and `walkForwards`, so this
+ * function cannot answer differently from the labelling - which is the point,
+ * since it is what the parity test against the Go engine runs.
  */
 export function reachableNodes(nodes: LabellableNode[], edges: LabellableEdge[]): Set<string> {
 	return walkForwards(shapeGraph(nodes, edges));
@@ -170,36 +250,36 @@ export function reachableNodes(nodes: LabellableNode[], edges: LabellableEdge[])
  * alike in the panel: the canvas highlight and the id tooltip are what tell
  * them apart.
  *
- * The order is built to agree with the engine (`execution.go`) rather than to
- * merely look plausible:
+ * The order is the order a single execution token visits nodes, because that
+ * is now literally what a run is (`docs/control-flow-interpreter.md`):
  *
- * - Edges are directed `source -> target`, and the run starts at the Start
- *   node, which `StartExecution` enqueues unconditionally - so edges pointing
- *   *into* Start are ignored here, exactly as they are there.
- * - A node's prerequisites are its predecessors that the run can also reach;
- *   `StartExecution` prunes edges out of dead branches for the same reason,
- *   which is why prerequisites are counted within a group rather than
- *   globally.
- * - `canEnqueue` waits for *every* prerequisite, so a join must be ordered
- *   after all of its inputs. Plain breadth-first would place it as soon as
- *   the first input was seen, so depth here is longest-path: a node sits one
- *   past the deepest node feeding it. Nodes that come ready together - the
- *   branches out of one node - are then ordered top to bottom by canvas
- *   position (y, then x, then id, purely so it is deterministic).
+ * - The token starts on the Start node, which the run begins at unconditionally
+ *   - so edges pointing *into* Start are ignored here, exactly as they are
+ *   there.
+ * - It leaves a node by its outgoing edges in ascending `sourceHandle` order,
+ *   depth-first: the whole of the first branch runs before the second one
+ *   starts. A Sequence node's `out-1`, `out-2`, `out-3` are that rule's reason
+ *   for existing.
+ * - A node is numbered the **first** time the token reaches it and skipped on
+ *   every later arrival. That is what makes a cycle terminate, and it is why a
+ *   node on two paths - which really does execute twice - is named once.
  *
- * Cycles: the depth pass is Kahn's algorithm, which only ever releases a node
- * once its last prerequisite has been released, so a node inside a cycle is
- * never released and the walk terminates instead of spinning. Whatever is
- * left over at the end is precisely the cyclic part - the engine would report
- * it as a stall - and it is appended in canvas order so it is still named.
+ * There is no scheduling left in here. The previous version ordered by
+ * longest-path Kahn because the engine's `canEnqueue` waited for every
+ * prerequisite before releasing a node, so a join had to be numbered after all
+ * of its inputs; the token has no such notion, and the ordering collapsed to
+ * the walk itself.
  *
  * Nodes the run cannot reach still need a step, since they are named in the
  * skipped-nodes warning and that list is sorted by it. They continue the
- * sequence after everything reachable, one dead branch at a time:
- * each weakly connected group of unreachable-but-wired nodes is walked in the
- * same longest-path order, groups taken top to bottom by their highest node.
- * Nodes in no edge at all are last - the backend never reports them, and they
- * are usually just something the user has only dropped on the canvas so far.
+ * sequence after everything reachable, one dead branch at a time: each weakly
+ * connected group of unreachable-but-wired nodes is walked the same way, seeded
+ * from the nodes nothing in the group points at, and canvas position (y, then
+ * x, then id) decides which seed goes first. A dead branch has no token order
+ * of its own - nothing runs it - so canvas order is the only sensible answer
+ * there, and it is the tie-break nowhere else. Nodes in no edge at all are
+ * last: the backend never reports them, and they are usually just something the
+ * user has only dropped on the canvas so far.
  */
 export function buildNodeLabels(
 	nodes: LabellableNode[],
@@ -215,54 +295,28 @@ export function buildNodeLabels(
 		return pa.y - pb.y || pa.x - pb.x || a.localeCompare(b);
 	};
 
+	// In visit order, which is the run's sequence.
 	const reachable = walkForwards(graph);
+	const order: string[] = [...reachable];
 
 	/**
-	 * One set of nodes in longest-path order, prerequisites counted only within
-	 * the set. Anything the walk cannot release (a cycle, or a node behind one)
-	 * is appended in canvas order rather than dropped or looped over.
+	 * One dead branch, walked like the run would have walked it had anything
+	 * started it. The seeds are the group's own roots - members nothing else in
+	 * the group points at - taken top to bottom; a group that is nothing but a
+	 * cycle has no roots, so whatever the walk did not reach is picked up
+	 * afterwards, also top to bottom.
 	 */
 	const orderGroup = (members: Set<string>): string[] => {
-		const waiting = new Map<string, number>();
-		for (const id of members) {
-			let count = 0;
-			for (const pred of predecessors.get(id) ?? []) {
-				if (members.has(pred)) count += 1;
-			}
-			waiting.set(id, count);
-		}
+		const inCanvasOrder = [...members].sort(canvasOrder);
+		const roots = inCanvasOrder.filter(
+			(id) => !(predecessors.get(id) ?? []).some((pred) => members.has(pred))
+		);
 
-		const depth = new Map<string, number>();
-		const released: string[] = [];
-		for (const id of members) {
-			if (waiting.get(id) === 0) {
-				depth.set(id, 0);
-				released.push(id);
-			}
-		}
-		for (let i = 0; i < released.length; i++) {
-			const current = released[i];
-			const nextDepth = (depth.get(current) ?? 0) + 1;
-			for (const next of successors.get(current) ?? []) {
-				if (!members.has(next)) continue;
-				const best = depth.get(next);
-				if (best === undefined || best < nextDepth) depth.set(next, nextDepth);
-				const left = (waiting.get(next) ?? 0) - 1;
-				waiting.set(next, left);
-				if (left === 0) released.push(next);
-			}
-		}
-
-		const ordered = released
-			.slice()
-			.sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || canvasOrder(a, b));
-		const releasedSet = new Set(released);
-		const stuck = [...members].filter((id) => !releasedSet.has(id)).sort(canvasOrder);
-		return [...ordered, ...stuck];
+		const visited = new Set<string>();
+		visitDepthFirst(successors, roots, visited, members);
+		visitDepthFirst(successors, inCanvasOrder, visited, members);
+		return [...visited];
 	};
-
-	const order: string[] = [];
-	if (reachable.size > 0) order.push(...orderGroup(reachable));
 
 	// Dead branches, one weakly connected group at a time.
 	const deadEnds = [...byId.keys()].filter((id) => !reachable.has(id) && wired.has(id));

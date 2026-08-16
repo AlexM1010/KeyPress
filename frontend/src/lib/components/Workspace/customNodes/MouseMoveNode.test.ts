@@ -22,6 +22,7 @@ type MouseMoveData = {
 	speed: { type: 'Instant' | 'Human'; value: number; randomize: boolean; variance: number };
 	pathType: 'Straight' | 'Human';
 	customPath: Coordinates[];
+	storeResultAs?: string;
 };
 
 /**
@@ -297,5 +298,70 @@ describe('MouseMoveNode', () => {
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Straight' })[0]);
 		expect(persisted(data).pathType).toBe('Straight');
+	});
+
+	it('stores nothing by default, rather than storing an empty name', () => {
+		const { data } = renderNode(MouseMoveNode, savedPayload());
+
+		// The distinction the run state rests on: a name that was never given has to
+		// be *absent*, because "unset" is what a Branch node's `isSet` asks about.
+		// An empty string would be a name, and one nobody chose.
+		expect('storeResultAs' in data).toBe(false);
+		expect('storeResultAs' in persistedData(data, 'MouseMoveNode')).toBe(false);
+	});
+
+	it('writes a typed result name into the payload', async () => {
+		const { data } = renderNode(MouseMoveNode, savedPayload());
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), { target: { value: 'spot' } });
+
+		expect(data.storeResultAs).toBe('spot');
+		expect(persisted(data).storeResultAs).toBe('spot');
+	});
+
+	it('names the two entries a stored position actually becomes', async () => {
+		renderNode(MouseMoveNode, savedPayload());
+
+		// Before anything is typed, the convention is stated in the abstract...
+		expect(screen.getByText(/<name>\.x/)).toBeDefined();
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), { target: { value: 'spot' } });
+
+		// ...and once there is a name, in the user's own words. This is the whole
+		// reason the hint exists: the backend writes `spot.x` and `spot.y` as two
+		// numbers, so someone who typed `spot` and then wrote a condition on `spot`
+		// would be reading a name nothing ever wrote to - and an unset name is
+		// false for every operator, so the branch would simply take the wrong edge
+		// with no error to explain it.
+		expect(screen.getByText('spot.x')).toBeDefined();
+		expect(screen.getByText('spot.y')).toBeDefined();
+	});
+
+	it('removes the result name when the box is cleared, rather than emptying it', async () => {
+		const { data } = renderNode(MouseMoveNode, savedPayload({ storeResultAs: 'spot' }));
+
+		expect((screen.getByLabelText('Store result as') as HTMLInputElement).value).toBe('spot');
+
+		await fireEvent.input(screen.getByLabelText('Store result as'), { target: { value: '' } });
+
+		// `bind:value` alone cannot express this - it would write `""` - and `""` is
+		// exactly the value the field must never take: `resultName` in Go reads a
+		// blank name as "store nothing", so the payload would be carrying a name
+		// that means the absence of one.
+		expect('storeResultAs' in data).toBe(false);
+		expect('storeResultAs' in persistedData(data, 'MouseMoveNode')).toBe(false);
+	});
+
+	it('survives the reactive backfill it shares the node with', async () => {
+		const { data } = renderNode(MouseMoveNode, savedPayload({ storeResultAs: 'spot' }));
+
+		// This node backfills from a reactive block that writes `data`, and the
+		// result name is synced from a second one. Two blocks that woke each other
+		// up would either loop or overwrite; an unrelated edit is what shows they
+		// settle.
+		await openMovementSettings();
+		await fireEvent.click(screen.getByLabelText('Drag'));
+
+		expect(persisted(data).storeResultAs).toBe('spot');
 	});
 });

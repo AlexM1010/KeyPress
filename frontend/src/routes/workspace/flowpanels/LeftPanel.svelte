@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { setContext } from 'svelte';
-	import { Play, Palette, Keyboard } from 'lucide-svelte';
+	import { Play, Palette, Keyboard, ListOrdered, GitBranch, Repeat } from 'lucide-svelte';
 	import MouseClickNode from '$lib/components/Workspace/customNodes/MouseClickNode.svelte';
 	import MouseMoveNode from '$lib/components/Workspace/customNodes/MouseMoveNode.svelte';
 	import StartNode from '$lib/components/Workspace/customNodes/StartNode.svelte';
 	import DelayNode from '$lib/components/Workspace/customNodes/DelayNode.svelte';
+	import SequenceNode from '$lib/components/Workspace/customNodes/SequenceNode.svelte';
+	import BranchNode from '$lib/components/Workspace/customNodes/BranchNode.svelte';
+	import LoopStartNode from '$lib/components/Workspace/customNodes/LoopStartNode.svelte';
 	import ColorPickerNode from '$lib/components/Workspace/customNodes/ColorPickerNode.svelte';
 	import KeyPressNode from '$lib/components/Workspace/customNodes/KeyPressNode.svelte';
 
@@ -46,6 +49,49 @@
 					isExpanded: false,
 					// Left undefined like the others: the node backfills its own
 					// DEFAULT_DATA, so the palette does not duplicate the payload.
+					data: undefined
+				},
+				{
+					// Must be 'SequenceNode': that is the key in customNodes/nodeTypes.ts
+					// and the case the Go dispatcher in tasks.go matches on. Any other
+					// spelling drops a node the backend rejects as an unknown task type.
+					type: 'SequenceNode',
+					label: 'Sequence Node',
+					icon: ListOrdered,
+					id: 'sequence-node',
+					component: SequenceNode,
+					isExpanded: false,
+					data: undefined
+				},
+				{
+					// Must be 'BranchNode': that is the key in customNodes/nodeTypes.ts
+					// and the case the Go dispatcher in tasks.go matches on. Any other
+					// spelling drops a node the backend rejects as an unknown task type.
+					type: 'BranchNode',
+					label: 'Branch Node',
+					icon: GitBranch,
+					id: 'branch-node',
+					component: BranchNode,
+					isExpanded: false,
+					// Left undefined like the others: the node backfills its own
+					// DEFAULT_DATA, so the palette does not duplicate the payload.
+					data: undefined
+				},
+				{
+					// One entry, two nodes. Dragging this out drops a whole loop - a
+					// Loop Start, its Loop End, and the `back` edge between them - because
+					// `onDrop` in Flow.svelte routes this type through `createLoopPair`.
+					// There is deliberately no separate "Loop End" entry: half a loop is
+					// not a thing the user can usefully be handed, and the editor's whole
+					// pairing contract is that the two halves arrive and leave together.
+					// The preview is the Loop Start, which is the half that carries the
+					// configuration.
+					type: 'LoopStartNode',
+					label: 'Loop',
+					icon: Repeat,
+					id: 'loop-node',
+					component: LoopStartNode,
+					isExpanded: false,
 					data: undefined
 				}
 			]

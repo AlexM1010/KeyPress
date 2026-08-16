@@ -1,12 +1,15 @@
 // src/lib/nodeTypes.ts
 import type { NodeTypes } from '@xyflow/svelte';
 import ColorPickerNode from './ColorPickerNode.svelte';
-import SVGNode from './SVGNode.svelte';
 import MouseClickNode from './MouseClickNode.svelte';
 import KeyPressNode from './KeyPressNode.svelte';
 import StartNode from './StartNode.svelte';
 import MouseMoveNode from './MouseMoveNode.svelte';
 import DelayNode from './DelayNode.svelte';
+import SequenceNode from './SequenceNode.svelte';
+import BranchNode from './BranchNode.svelte';
+import LoopStartNode from './LoopStartNode.svelte';
+import LoopEndNode from './LoopEndNode.svelte';
 
 /**
  * The node `type` string a saved node carries -> the component that draws it.
@@ -26,10 +29,17 @@ import DelayNode from './DelayNode.svelte';
  */
 export const nodeTypes: NodeTypes = {
 	ColorPickerNode: ColorPickerNode,
-	svgNode: SVGNode,
 	MouseClickNode: MouseClickNode,
 	KeyPressNode: KeyPressNode,
 	StartNode: StartNode,
 	MouseMoveNode: MouseMoveNode,
-	DelayNode: DelayNode
+	DelayNode: DelayNode,
+	SequenceNode: SequenceNode,
+	BranchNode: BranchNode,
+	// The two halves of a loop. Both are registered, although the palette offers
+	// only one entry ("Loop") that drops the pair: a saved macro's Loop End needs
+	// a component to be drawn with, and the pair is created by `createLoopPair`
+	// rather than by dropping each half.
+	LoopStartNode: LoopStartNode,
+	LoopEndNode: LoopEndNode
 };
