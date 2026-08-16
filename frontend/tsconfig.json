@@ -8,7 +8,25 @@
 		"resolveJsonModule": true,
 		"skipLibCheck": true,
 		"sourceMap": true,
-		"strict": true
+		"strict": true,
+
+		// `.svelte-kit/tsconfig.json` already sets `verbatimModuleSyntax` and
+		// `isolatedModules`; the three below are the rest of the "type syntax must
+		// erase cleanly, and control flow must be explicit" set, each measured at
+		// zero errors on this tree.
+		//
+		// Bans the TypeScript-only syntax that has to be *executed* rather than
+		// stripped - `enum`, `namespace` with a runtime body, constructor parameter
+		// properties. Vite strips types with esbuild and never runs tsc over the
+		// app, so any of those would compile to nothing and fail at runtime.
+		"erasableSyntaxOnly": true,
+		// A subclass method that shadows a base one must say `override`, so
+		// renaming the base method turns its orphaned overrides into errors rather
+		// than into methods nothing calls.
+		"noImplicitOverride": true,
+		// A `case` that falls into the next one must be empty. Deliberate
+		// fallthrough is still available by writing the cases adjacent.
+		"noFallthroughCasesInSwitch": true
 	}
 	// Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
 	// except $lib which is handled by https://svelte.dev/docs/kit/configuration#files

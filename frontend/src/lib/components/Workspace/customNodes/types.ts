@@ -1,5 +1,5 @@
 // src/lib/components/customNodes/types.ts
-import type { Position, Node } from '@xyflow/svelte';
+import type { Position } from '@xyflow/svelte';
 
 export type HandleConfig = {
 	type: 'source' | 'target';
@@ -20,16 +20,6 @@ export interface SVGNodeData extends Record<string, unknown> {
 		stroke?: string;
 		strokeWidth?: number;
 	};
-}
-
-export interface SVGNode extends Node {
-	type: 'svg-node';
-	dragHandle: string;
-	data: SVGNodeData;
-}
-
-export function isSVGNode(node: Node): node is SVGNode {
-	return node.type === 'svg-node';
 }
 
 export interface NodeStyle {
@@ -54,21 +44,4 @@ export interface SVGNodeData {
 	handles?: HandleConfig[];
 	width?: number;
 	height?: number;
-}
-
-export interface AutomationNode {
-	id: string;
-	type: 'startNode' | 'endNode' | 'clickNode' | 'moveNode' | 'keyNode' | 'delayNode';
-	data: {
-		label: string;
-		clickType?: 'left' | 'right' | 'double';
-		key?: string;
-		delay?: number;
-		mouseX?: number;
-		mouseY?: number;
-	};
-	position: {
-		x: number;
-		y: number;
-	};
 }

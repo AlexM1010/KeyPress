@@ -59,6 +59,36 @@ export default defineConfig({
 		// Tests sit next to the module they cover, so a function and its spec are
 		// read together and neither can be moved without the other being noticed.
 		include: ['src/**/*.test.ts'],
-		setupFiles: [fromHere('./src/lib/test/setup.ts')]
+		setupFiles: [fromHere('./src/lib/test/setup.ts')],
+		coverage: {
+			provider: 'v8',
+			reporter: ['text', 'html'],
+			reportsDirectory: fromHere('./coverage'),
+			// `include` has to be spelled out. Vitest 4 removed `coverage.all` and
+			// `coverage.extensions`, and what replaced them reports only the files
+			// some test actually imported - so a module with no test at all is not
+			// 0% in the table, it is absent from the table, and the percentages read
+			// as though the untested half of the app did not exist. Naming the globs
+			// puts every source file in the denominator whether a test reaches it or
+			// not, which is the only number worth looking at.
+			include: ['src/**/*.{ts,svelte}'],
+			exclude: [
+				// Written by `wails3 generate bindings -clean=true`. Not ours to test
+				// and not ours to edit - the generator deletes the directory first.
+				'src/lib/bindings/**',
+				// The tests themselves, and the harness they mount components with.
+				// Counting either inflates the total with code whose only caller is
+				// the coverage run.
+				'src/**/*.test.ts',
+				'src/lib/test/**',
+				// Config and SvelteKit's own scaffolding, which carry no logic.
+				'src/**/*.d.ts',
+				'src/app.d.ts',
+				'src/hooks.*.ts'
+			]
+			// Deliberately no `thresholds`. This is here to be looked at, not to
+			// fail a build - a threshold set at today's number turns every honest
+			// commit that adds a file into a red CI run.
+		}
 	}
 });

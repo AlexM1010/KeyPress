@@ -1,0 +1,37 @@
+// Knip config. JSONC rather than JSON so each entry can say *why* it is here:
+// every one is a false positive, not a suppression of real dead code. The
+// genuinely unused files, exports and dependencies knip found were deleted
+// rather than listed below.
+//
+// Entry points and `$lib` resolution are left to knip's SvelteKit plugin, which
+// already knows the `+page`/`+layout` globs and reads the alias out of
+// `svelte.config.js`. Nothing about either needs restating here.
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+
+	// Written by `wails3 generate bindings -clean=true` from the Go side. The
+	// generator emits a binding per exported Go method whether or not the
+	// frontend calls it yet, and it deletes this directory before rewriting it -
+	// so every "unused export" in here is both expected and unfixable from this
+	// side. Retiring one means deleting the Go method and regenerating.
+	"ignore": ["src/lib/bindings/**"],
+
+	// Exported, but referenced only inside their own module. Knip counts that as
+	// unused; the export is deliberate in each case. `NodeDataPayload` is the
+	// constraint on the exported `FlowNode<TData>` and `StoredNode` is a member
+	// of the exported `StoredFlowData`, so anything naming either generic needs
+	// them importable; `NodeStyle` and `NodeShape` spell out the exported
+	// `SVGNodeData` the same way. Un-exporting them to satisfy knip would make
+	// the public types unusable from outside.
+	"ignoreExportsUsedInFile": true,
+
+	// Not a real entry point - listing it here is how knip is told to stop
+	// reporting a file's exports, and this file's exports are the whole point of
+	// it. It stands in for SvelteKit's virtual `$app/environment`, aliased in by
+	// `vitest.config.ts`. Only `browser` is read today; `dev`, `building` and
+	// `version` exist because the module it replaces has them, and a stub that
+	// answers a subset of the real API fails as a baffling `undefined` the first
+	// time a component reads one of the others. Deleting them to satisfy knip
+	// would be trading a warning for a trap.
+	"entry": ["src/lib/test/appEnvironment.ts"]
+}

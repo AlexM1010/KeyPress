@@ -6,6 +6,9 @@ node_modules
 /.svelte-kit
 /build
 
+# `npm run coverage` output - the v8 report and its HTML viewer.
+/coverage
+
 # OS
 .DS_Store
 Thumbs.db
