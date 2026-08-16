@@ -921,7 +921,7 @@ func TestHandleCompletionsEndsTheRunWhenTheQueueIsCancelled(t *testing.T) {
 func TestStopExecutionWithNothingRunningLeavesTheQueueAlone(t *testing.T) {
 	app := newTestApp(t)
 	logs := captureLogs(t)
-	app.taskQueue.Start(defaultWorkerCount)
+	app.taskQueue.Start(unlimitedWorkers)
 	generation := app.taskQueue.Context()
 
 	app.StopExecution()
@@ -937,7 +937,7 @@ func TestStopExecutionWithNothingRunningLeavesTheQueueAlone(t *testing.T) {
 func TestStopExecutionStopsARunInProgress(t *testing.T) {
 	app := newTestApp(t)
 	logs := captureLogs(t)
-	app.taskQueue.Start(defaultWorkerCount)
+	app.taskQueue.Start(unlimitedWorkers)
 	generation := app.taskQueue.Context()
 	app.setExecuting(true)
 

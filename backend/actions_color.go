@@ -17,8 +17,8 @@ import (
 
 const (
 	// colorPollInterval is how often the screen pixel is sampled while waiting.
-	// A ticker rather than a busy loop: a tight loop would peg a core and, with
-	// only defaultWorkerCount workers, starve the rest of the pool.
+	// A ticker rather than a busy loop: a tight loop would peg a core for as
+	// long as the wait lasts, and a colour wait can last minutes.
 	colorPollInterval = 100 * time.Millisecond
 
 	// Fallbacks for payloads written before these fields existed.

@@ -155,7 +155,7 @@ func (a *App) startFlow(flowData FlowData) error {
 
 	// Bring the worker pool back up if a previous run stopped it. This is a
 	// no-op while the pool is already running.
-	a.taskQueue.Start(defaultWorkerCount)
+	a.taskQueue.Start(unlimitedWorkers)
 
 	// Capture this run's generation before enqueueing anything: everything this
 	// run submits is stamped with the generation it belongs to, and

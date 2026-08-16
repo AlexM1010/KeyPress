@@ -112,7 +112,7 @@ func TestTaskQueueProcessesEnqueuedTasks(t *testing.T) {
 	app := newTestApp(t)
 	queue := app.taskQueue
 
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 	queue.Enqueue(currentGeneration(queue), inertTask("first"))
 
 	awaitCompletion(t, app, "first")
@@ -140,12 +140,12 @@ func TestTaskQueueStartIsIdempotent(t *testing.T) {
 	queue.Enqueue(currentGeneration(queue), inertTask("after-the-second-start"))
 	awaitCompletion(t, app, "after-the-second-start")
 
-	// How many workers there really are is only knowable once they have all
-	// exited, and Stop does not return until they have. Two, not seven: the
+	// How many dispatchers there really are is only knowable once they have
+	// exited, and Stop does not return until they have. One, not three: the
 	// later calls added nothing.
 	queue.Stop()
-	if got := logs.count("stopping: context canceled"); got != 2 {
-		t.Errorf("%d workers exited, want the 2 the first Start asked for:\n%s", got, logs)
+	if got := logs.count("Dispatcher stopping: context canceled"); got != 1 {
+		t.Errorf("%d dispatchers exited, want the 1 the first Start brought up:\n%s", got, logs)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestTaskQueueCanBeStartedAgainAfterBeingStopped(t *testing.T) {
 	app := newTestApp(t)
 	queue := app.taskQueue
 
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 	firstGeneration := queue.Context()
 	queue.Enqueue(currentGeneration(queue), inertTask("before"))
 	awaitCompletion(t, app, "before")
@@ -165,7 +165,7 @@ func TestTaskQueueCanBeStartedAgainAfterBeingStopped(t *testing.T) {
 		t.Fatal("Stop left the first generation's context live")
 	}
 
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 	secondGeneration := queue.Context()
 	if secondGeneration == firstGeneration {
 		t.Error("the restarted pool is running on the stopped generation's context")
@@ -178,21 +178,50 @@ func TestTaskQueueCanBeStartedAgainAfterBeingStopped(t *testing.T) {
 	awaitCompletion(t, app, "after")
 }
 
-// Stop waits for its workers, so nothing from the stopped generation is still
-// running by the time it returns.
-func TestTaskQueueStopWaitsForItsWorkers(t *testing.T) {
+// Stop waits for the task that was in flight, not just for the dispatcher, so
+// nothing of the stopped generation is still touching the machine by the time
+// it returns.
+//
+// This is the guarantee that survived the move from a fixed pool to a
+// goroutine per task, and it is the one worth asserting directly: the
+// dispatcher holds itself open until the tasks it started have returned, so
+// q.wg is not satisfied while one is still running. A delay node is the probe
+// because it is the only task type that blocks for a knowable time without
+// touching the mouse, and it watches the generation's context - so Stop's
+// cancel ends the wait rather than this test sitting through a minute of it.
+func TestTaskQueueStopWaitsForTheTaskInFlight(t *testing.T) {
 	app := newTestApp(t)
 	logs := captureLogs(t)
 	queue := app.taskQueue
 
-	queue.Start(defaultWorkerCount)
-	queue.Enqueue(currentGeneration(queue), inertTask("first"))
-	awaitCompletion(t, app, "first")
+	queue.Start(unlimitedWorkers)
+	queue.Enqueue(currentGeneration(queue), Task{
+		ID:   "in-flight",
+		Type: "DelayNode",
+		Data: map[string]interface{}{"delayType": "Fixed", "time": float64(60000)},
+	})
+
+	// Wait until it is genuinely running. Without this, Stop could win the race
+	// to the channel and the assertion below would pass without ever having
+	// tested anything.
+	waitFor(t, testTimeout, "the delay task to start", func() bool {
+		return logs.count("Processing task in-flight") == 1
+	})
 
 	queue.Stop()
 
-	if got := logs.count("stopping: context canceled"); got != defaultWorkerCount {
-		t.Errorf("%d of %d workers had exited when Stop returned:\n%s", got, defaultWorkerCount, logs)
+	// executeTask logs this from a defer, so it is written whether the task ran
+	// to completion or was cut short by the cancel - which is what makes it the
+	// right signal. The completion on notifyCh is not: notifyTaskCompletion
+	// drops it when the context is already cancelled, so whether it arrives
+	// depends on whether the task beat Stop to it, and asserting on it made this
+	// test fail about one run in three.
+	if got := logs.count("Completed execution of task ID: in-flight"); got != 1 {
+		t.Errorf("Stop returned while its task was still running:\n%s", logs)
+	}
+
+	if got := logs.count("Dispatcher stopping: context canceled"); got != 1 {
+		t.Errorf("%d dispatchers exited, want 1:\n%s", got, logs)
 	}
 }
 
@@ -234,7 +263,7 @@ func TestEnqueueAfterStopReturnsWithoutRunningAnything(t *testing.T) {
 	app := newTestApp(t)
 	queue := app.taskQueue
 
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 	queue.Stop()
 
 	enqueued := make(chan struct{})
@@ -302,7 +331,7 @@ func TestEnqueueWithAStaleTokenIsRefusedByTheNextRun(t *testing.T) {
 func TestEnqueueDuringStopDoesNotPanic(t *testing.T) {
 	app := newTestApp(t)
 	queue := app.taskQueue
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 
 	const (
 		enqueuers        = 4
@@ -330,7 +359,7 @@ func TestEnqueueDuringStopDoesNotPanic(t *testing.T) {
 
 	// Whatever the race did, the queue is still usable.
 	app.drainNotifications()
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 	queue.Enqueue(currentGeneration(queue), inertTask("survivor"))
 	awaitCompletion(t, app, "survivor")
 }
@@ -350,7 +379,7 @@ func TestEnqueueRacingStopDoesNotLeakIntoTheNextGeneration(t *testing.T) {
 	app := newTestApp(t)
 	captureLogs(t) // the enqueuers are loud; keep the suite's output readable
 	queue := app.taskQueue
-	queue.Start(defaultWorkerCount)
+	queue.Start(unlimitedWorkers)
 
 	const enqueuers = 4
 

@@ -90,7 +90,7 @@ func (a *App) ServiceName() string {
 // v2 OnStartup callback.
 func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	a.ctx = ctx
-	a.taskQueue.Start(defaultWorkerCount)
+	a.taskQueue.Start(unlimitedWorkers)
 	return nil
 }
 

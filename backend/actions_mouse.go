@@ -22,7 +22,7 @@ const defaultMouseSleep = 100
 // mouseMu guards the robotgo.MouseSleep package-level global and every robotgo
 // mouse call that reads it (Move, MoveSmooth, Click, Toggle, Scroll, ...).
 //
-// Up to defaultWorkerCount tasks run at once, so without this two mouse tasks
+// Every task the flow makes ready runs at once, so without this two mouse tasks
 // would interleave their "set speed / move / restore speed" sequences: one
 // task's restore-to-default clobbers another's live setting, and the concurrent
 // read/write of the global is a data race. Holding it for the whole handler
