@@ -31,7 +31,7 @@ const (
 // through seconds to minutes, so a long wait is something the UI genuinely lets
 // a user ask for, and a clamp has no business second-guessing it. Nor is
 // hanging the reason for one: waitInterruptible watches the run's context, so
-// however long the wait, Stop still ends it at once and no worker is wedged.
+// however long the wait, Stop still ends it at once and the run is not wedged.
 //
 // What forces a ceiling anyway is the arithmetic. time.Duration is int64
 // nanoseconds and tops out around 292 years, so `time.Duration(ms) *
@@ -53,8 +53,8 @@ const maxDelayMs = 24 * 60 * 60 * 1000
 // completion. A canceled ctx cuts it short and returns false.
 //
 // This exists because a plain time.Sleep is invisible to cancellation: Stop
-// cancels the run's context and then waits on the worker WaitGroup, so a
-// sleeping task would hold Stop up for the whole remaining delay - a ten minute
+// cancels the run's context and then waits on the runner's WaitGroup, so a
+// sleeping node would hold Stop up for the whole remaining delay - a ten minute
 // delay node froze the Stop button for ten minutes.
 //
 // A non-positive duration returns at once without consulting ctx, matching what
@@ -176,13 +176,14 @@ func parseDelayConfig(data map[string]interface{}) (delayConfig, error) {
 // [min, max) for a random one.
 //
 // rand.Float64 reads the global source, which Go seeds randomly at startup
-// (since 1.20) and which is safe for concurrent use - and concurrency is not
-// hypothetical here, because delay tasks run on a worker pool several at a
-// time. The code this replaces built a generator per call from
-// time.Now().UnixNano(), which predates that automatic seeding and is now
-// strictly worse than the global one: it allocates on every execution, and two
-// delay nodes the pool starts inside the same clock tick would seed identically
-// and draw the same "random" wait as each other.
+// (since 1.20) and which is safe for concurrent use. The code this replaces
+// built a generator per call from time.Now().UnixNano(), which predates that
+// automatic seeding and is strictly worse than the global one: it allocates on
+// every execution, and two delay nodes reached inside the same clock tick seed
+// identically and draw the same "random" wait as each other. That last part is
+// not about concurrency and did not stop being true when the interpreter made a
+// run single-threaded - a loop can run two delay nodes within one tick of the
+// clock perfectly well.
 func (cfg delayConfig) duration() time.Duration {
 	if cfg.kind == delayKindRandom {
 		// Drawn in Duration space rather than in float milliseconds, so the
@@ -194,29 +195,42 @@ func (cfg delayConfig) duration() time.Duration {
 }
 
 // executeDelayTask waits for the configured fixed or random duration.
-func executeDelayTask(task Task, app *App) {
+//
+// ctx is the context of the run this task belongs to. It arrives as a parameter
+// rather than being read out of app.runner, and that is worth a word because
+// the two are not the same question. Context() answers "which generation is
+// current now"; what a handler needs is "which generation started me", and the
+// only reason those agreed was a non-local invariant - the run is held in the
+// runner's WaitGroup until it returns, and Stop installs the next generation
+// only after waiting on it, so the generation cannot advance underneath a
+// running handler. A caller that ran handlers outside that WaitGroup would
+// break it silently: Context() would return the idle generation's live,
+// never-cancelled context and every wait below would quietly stop being
+// interruptible. That invariant still holds - the walk goroutine is in the
+// WaitGroup, deliberately - but a parameter is correct by
+// construction instead, it removes the mouse handlers' need to take the
+// runner's lock while holding mouseMu, and it is what makes the cancellation
+// paths testable at all - an already-cancelled context can be passed in, where
+// a global reached for inside the handler cannot be arranged from a test.
+func executeDelayTask(ctx context.Context, task Task, _ *runState, app *App) (string, error) {
 	log.Printf("Delay task starting - Data: %+v", task.Data)
 
-	// Handlers cannot return an error, so every failure is reported the same way
-	// the other actions_*.go handlers report theirs.
-	fail := func(err error) {
+	// Reported to the frontend as well as returned: the event is what the status
+	// panel listens for, the error is what the caller sees, and they are the same
+	// value so the two cannot disagree.
+	fail := func(err error) error {
 		log.Printf("Delay error: %s for task %s", err, task.ID)
 		app.emitEvent("task-error", map[string]interface{}{
 			"taskID": task.ID,
 			"error":  err.Error(),
 		})
+		return err
 	}
 
 	cfg, err := parseDelayConfig(task.Data)
 	if err != nil {
-		fail(err)
-		return
+		return "", fail(err)
 	}
-
-	// Capture this run's context once, up front: it is the generation the
-	// worker running us belongs to, so Stop's cancel unblocks the wait below
-	// and Stop's wg.Wait is never held up by it.
-	ctx := app.taskQueue.Context()
 
 	// Logged as durations that have been through the parser rather than as the
 	// raw numbers in the payload, so a value maxDelayMs cut down says what will
@@ -230,14 +244,22 @@ func executeDelayTask(task Task, app *App) {
 
 	if !waitInterruptible(ctx, duration) {
 		// The user pressed Stop (or the run was torn down). Return without an
-		// error event: StopExecution already reports the stop, and the worker
-		// must be free to exit.
+		// error event: the run reports its own ending once it stops walking,
+		// and the walk must be free to return - Stop is waiting on it.
+		//
+		// And without an error either. Cancellation is not a failure of this
+		// node, it is the run ending, and the caller already knows that from the
+		// context it handed us - a sentinel error would be a second mechanism
+		// carrying the same fact, and one the caller would have to remember to
+		// tell apart from a real failure. Every handler that can be interrupted
+		// returns ("", nil) here for that reason.
 		log.Printf("Delay canceled for task %s", task.ID)
-		return
+		return "", nil
 	}
 
 	app.emitEvent("task-success", map[string]interface{}{
 		"taskID": task.ID,
 		"type":   "Delay",
 	})
+	return "", nil
 }

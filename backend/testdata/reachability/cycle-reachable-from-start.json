@@ -1,5 +1,5 @@
 {
-  "description": "A loop the run can reach. Both walks must terminate on it, and must reach every node in the loop. (The engine would then report the loop as a stall - reachability is not runnability.)",
+  "description": "A loop the run can reach. Both walks must terminate on it, and must reach every node in the loop. (Terminating here is a property of this walk, which expands a node once; the engine's own walk runs the loop round and round, which is a macro rather than a fault - what ends it is the user's stop.)",
   "flow": {
     "nodes": [
       { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },

@@ -1,0 +1,26 @@
+{
+  "description": "A Branch node whose condition holds leaves by its \"true\" handle, which takes that one edge and no other. Everything behind the \"false\" handle stays unrun.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "branch",
+        "type": "BranchNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "variable": "matched", "operator": "isSet", "value": "" }
+      },
+      { "id": "on-true", "type": "MouseClickNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "after-true", "type": "DelayNode", "position": { "x": 600, "y": -100 }, "data": {} },
+      { "id": "on-false", "type": "KeyPressNode", "position": { "x": 400, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "branch", "sourceHandle": "right" },
+      { "id": "e2", "source": "branch", "target": "on-true", "sourceHandle": "true" },
+      { "id": "e3", "source": "branch", "target": "on-false", "sourceHandle": "false" },
+      { "id": "e4", "source": "on-true", "target": "after-true", "sourceHandle": "right" }
+    ]
+  },
+  "outputs": { "branch": "true" },
+  "visits": ["start", "branch", "on-true", "after-true"],
+  "multipath": []
+}

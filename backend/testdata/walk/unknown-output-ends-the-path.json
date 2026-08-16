@@ -1,0 +1,17 @@
+{
+  "description": "A node that leaves by an output nothing is wired to ends that path, normally and quietly. It is how a macro finishes, not an error, so the run reports itself completed with the rest of the graph never having been reached.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "branch", "type": "ColorPickerNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "never", "type": "MouseClickNode", "position": { "x": 400, "y": 0 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "branch", "sourceHandle": "right" },
+      { "id": "e2", "source": "branch", "target": "never", "sourceHandle": "out-found" }
+    ]
+  },
+  "outputs": { "branch": "out-nothing-is-wired-here" },
+  "visits": ["start", "branch"],
+  "multipath": []
+}

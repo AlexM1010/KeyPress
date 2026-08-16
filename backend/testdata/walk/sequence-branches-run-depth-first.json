@@ -1,0 +1,22 @@
+{
+  "description": "A Sequence node's first branch runs to its end before the second is started: the walk is depth-first, not breadth-first.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "seq", "type": "SequenceNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "upper", "type": "KeyPressNode", "position": { "x": 400, "y": -100 }, "data": {} },
+      { "id": "upper-tail", "type": "KeyPressNode", "position": { "x": 600, "y": -100 }, "data": {} },
+      { "id": "lower", "type": "KeyPressNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "lower-tail", "type": "KeyPressNode", "position": { "x": 600, "y": 100 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "seq", "sourceHandle": "right" },
+      { "id": "e2", "source": "seq", "target": "upper", "sourceHandle": "out-1" },
+      { "id": "e3", "source": "seq", "target": "lower", "sourceHandle": "out-2" },
+      { "id": "e4", "source": "upper", "target": "upper-tail", "sourceHandle": "right" },
+      { "id": "e5", "source": "lower", "target": "lower-tail", "sourceHandle": "right" }
+    ]
+  },
+  "visits": ["start", "seq", "upper", "upper-tail", "lower", "lower-tail"],
+  "multipath": []
+}

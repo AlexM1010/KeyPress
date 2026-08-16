@@ -1,0 +1,20 @@
+{
+  "description": "A Sequence node runs its outputs in handle order. The three targets are laid out and named so that canvas order and id order both say alpha, mike, zulu - the walk must say zulu, alpha, mike, because that is the order the handles are in.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      { "id": "seq", "type": "SequenceNode", "position": { "x": 200, "y": 0 }, "data": {} },
+      { "id": "alpha", "type": "DelayNode", "position": { "x": 400, "y": 100 }, "data": {} },
+      { "id": "mike", "type": "DelayNode", "position": { "x": 400, "y": 200 }, "data": {} },
+      { "id": "zulu", "type": "DelayNode", "position": { "x": 400, "y": 300 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "seq", "sourceHandle": "right" },
+      { "id": "e2", "source": "seq", "target": "zulu", "sourceHandle": "out-1" },
+      { "id": "e3", "source": "seq", "target": "alpha", "sourceHandle": "out-2" },
+      { "id": "e4", "source": "seq", "target": "mike", "sourceHandle": "out-3" }
+    ]
+  },
+  "visits": ["start", "seq", "zulu", "alpha", "mike"],
+  "multipath": []
+}

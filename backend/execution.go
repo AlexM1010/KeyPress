@@ -1,7 +1,8 @@
 // execution.go
 //
-// Flow execution engine: turns a flowchart into a dependency graph, drives the
-// task queue from it and tracks the overall execution state.
+// Flow execution: the entry points a run starts from, the checks and lints that
+// run before it, the goroutine that drives it, and the state the app reports
+// while it is going. The walk itself is in interpreter.go.
 
 package backend
 
@@ -13,6 +14,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 )
 
 // StartExecution receives the flowchart data and starts execution. It is what
@@ -34,7 +36,39 @@ func (a *App) StartExecution(flow string) error {
 //
 // It is bound to the frontend as well, so the projects list can run a macro
 // without opening it in the workspace first.
+//
+// **It is a toggle.** A run in progress is stopped and nothing is started; only
+// an idle app starts one. This is AutoHotkey's canonical `Toggle := !Toggle`,
+// expressed with the context cancellation this app already has instead of a
+// shared flag, and it is what makes an endless loop a usable macro rather than
+// a trap: with the iteration budget gone, the hotkey the user pressed to start
+// a loop is the way out of it. The re-entrancy hazard those threads keep
+// hitting - a second press landing inside the first press's still-running loop
+// - is commit 33797cb's bug, and the runner's generation token is what stays to
+// make this safe.
+//
+// **startFlow deliberately keeps its refusal**, and the toggle lives only here.
+// The two entry points want different answers. This one is a hotkey or a tray
+// item: one chord, no second key, and the user pressing it while a macro runs
+// can only mean stop. StartExecution is the workspace's Run button, which sits
+// next to a Stop button - a user who wants to stop presses that, and a Run
+// press that silently stopped the run would be indistinguishable from one that
+// started a fresh one. So the shared start path still reports "execution
+// already in progress" and TestStartFlowRefusesASecondRun stays valid.
+//
+// The stop and the start are not one atomic operation, and cannot be while
+// startFlow takes execMutex itself. What is left is the window between finding
+// the app idle and startFlow claiming it, in which a second press could load
+// its macro and then be refused by startFlow's guard - which is exactly what a
+// double-press does today, reported the same way. Nothing new is possible in
+// it: the two presses cannot both start a run, because the refusal is under the
+// same lock as the claim.
 func (a *App) RunMacro(id string) error {
+	if a.stopIfRunning() {
+		log.Printf("RunMacro %q: a run was in progress, so the press stopped it", id)
+		return nil
+	}
+
 	flowData, err := a.LoadProject(id)
 	if err != nil {
 		log.Printf("RunMacro %q: %v", id, err)
@@ -56,184 +90,163 @@ func (a *App) RunMacro(id string) error {
 // startFlow runs a flowchart. Both entry points funnel through here so the
 // execution state, the panic guard and the graph setup have exactly one
 // implementation.
+//
+// execMutex is held for the whole of it, and StopExecution and ServiceShutdown
+// take it too: that is what stops a run beginning while the previous one is
+// still being torn down. It is safe to hold across Runner.Go because Go only
+// launches - the wait is Stop's, and the walk goroutine takes no lock of the
+// App's on its way out.
 func (a *App) startFlow(flowData FlowData) error {
 	a.execMutex.Lock()
 	defer a.execMutex.Unlock()
 
-	if a.isExecuting {
+	if a.GetIsExecuting() {
 		log.Println("startFlow called but execution is already in progress")
 		return errors.New("execution already in progress")
 	}
-	a.setExecutingLocked(true)
+
+	// Asked here, before the flag below is claimed, rather than only at the
+	// launch at the end: setExecuting writes twenty-odd tray menu items each
+	// way, and a refusal that arrives after ServiceShutdown has returned would
+	// be writing them while the main thread destroys the menu they belong to.
+	//
+	// The read is authoritative for every caller there is today - it is under
+	// execMutex, and the only in-app Close is ServiceShutdown's, which holds
+	// execMutex too - so nothing can close the runner between here and the
+	// launch below. Go re-checks anyway, and remains the authority, because it
+	// is what a future Close caller that does not hold execMutex would be
+	// checked by.
+	if a.runner.Closed() {
+		log.Println("startFlow called while the app is shutting down")
+		return errRunnerClosed
+	}
+
+	a.setExecuting(true)
 	log.Println("Execution started")
 	defer func() {
 		if r := recover(); r != nil {
-			// execMutex is still held here (this defer runs before the
-			// deferred Unlock), so use the locked variant.
-			a.setExecutingLocked(false)
+			a.setExecuting(false)
 			log.Printf("Recovered from panic in startFlow: %v", r)
 			a.emitEvent("execution-error", fmt.Sprintf("panic: %v", r))
 		}
 	}()
 
-	// Validate flowchart
+	// Everything a run can be refused for is decided here, before a single node
+	// has run. A macro that fails halfway has already typed half of itself into
+	// whatever the user had focused.
 	if len(flowData.Nodes) == 0 {
-		a.setExecutingLocked(false)
-		log.Println("Flowchart validation failed: no nodes found")
-		return errors.New("flowchart must contain at least one node")
-	}
-
-	// Build node map for easy access
-	allNodes := make(map[string]Node)
-	for _, node := range flowData.Nodes {
-		allNodes[node.ID] = node
+		return a.refuseRun(errors.New("flowchart must contain at least one node"))
 	}
 
 	// The run is defined by the Start node, so locate it before anything is
 	// built from the graph.
 	startNode, err := a.findStartNode(flowData.Nodes)
 	if err != nil {
-		a.setExecutingLocked(false)
-		log.Printf("startFlow failed: %v", err)
-		return err
+		return a.refuseRun(err)
 	}
 
-	// Adjacency over every edge, used only to work out what the run can
-	// actually get to.
-	allEdges := make(map[string][]string)
-	for _, edge := range flowData.Edges {
-		allEdges[edge.Source] = append(allEdges[edge.Source], edge.Target)
+	if err := validateOutputHandles(flowData); err != nil {
+		return a.refuseRun(err)
 	}
 
-	// Only nodes reachable from the Start node take part in the run.
+	// The lints. Neither decides what runs - the token simply never arrives at
+	// an unreachable node - so both are here to tell the user something about
+	// the graph they drew, and nothing below reads their answers.
+	a.warnAboutSkippedNodes(flowData, reachableFrom(startNode.ID, adjacency(flowData), nodesByIDFrom(flowData)))
+	a.warnAboutMultipathNodes(flowData, startNode.ID)
+
+	r := newRun(flowData, startNode.ID, a.executeNode)
+
+	// Captured together in one call so the token and the context cannot
+	// describe different generations - see Runner.Current. The token is what
+	// makes the launch below refuse to start a run into a generation that has
+	// been stopped since.
 	//
-	// The engine drives itself forwards: a node is enqueued when one of its
-	// prerequisites completes. A node the Start node cannot reach is therefore
-	// never enqueued, so counting it towards completion would mean the run can
-	// never finish and sits there reporting itself as still in progress.
-	// Anything unreachable is left out of the graph entirely instead, and the
-	// user is warned about it below.
-	reachable := reachableFrom(startNode.ID, allEdges, allNodes)
-
-	nodeMap := make(map[string]Node, len(reachable))
-	for id := range reachable {
-		nodeMap[id] = allNodes[id]
+	// A refusal is returned rather than swallowed, and that is the whole of the
+	// shutdown fix at this end: the runner is closed once ServiceShutdown has
+	// run, so a hotkey or a tray click arriving during teardown is told that
+	// nothing started instead of leaving the caller - and the user - to assume a
+	// run is under way. refuseRun clears the executing flag this function set on
+	// its way in, so a refused run leaves the app exactly as idle as it found it.
+	execGen, execCtx := a.runner.Current()
+	if err := a.runner.Go(execGen, func() { a.walk(execCtx, r) }); err != nil {
+		return a.refuseRun(err)
 	}
-
-	// Build dependencies, keeping only the edges between two reachable nodes.
-	//
-	// Pruning here is what makes a prerequisite that lives on a dead branch
-	// count as satisfied: canEnqueue derives a node's prerequisites from this
-	// map, so an incoming edge from a node that will never run simply is not
-	// one of them, and the live half of the flow proceeds. (An edge whose
-	// source is reachable always has a reachable target - that is how the walk
-	// found it - so this only ever drops edges coming out of dead branches.)
-	dependencies := make(map[string][]string)
-	for _, edge := range flowData.Edges {
-		if reachable[edge.Source] && reachable[edge.Target] {
-			dependencies[edge.Source] = append(dependencies[edge.Source], edge.Target)
-		}
-	}
-
-	// Publish the graph under graphMux; from here on it is read-only for the
-	// duration of the run.
-	a.setGraph(nodeMap, dependencies)
-
-	// Initialize completed map
-	a.completedMux.Lock()
-	a.completed = make(map[string]bool)
-	a.completedMux.Unlock()
-
-	// Discard completions left over from a previous run. Safe here: either
-	// the previous run finished on its own or StopExecution waited for the
-	// workers, so nothing is sending on notifyCh right now.
-	a.drainNotifications()
-
-	// Tell the user which wired-up nodes are being left out, so a branch that
-	// silently does nothing is visible rather than mysterious.
-	a.warnAboutSkippedNodes(flowData, reachable)
-
-	// Bring the worker pool back up if a previous run stopped it. This is a
-	// no-op while the pool is already running.
-	a.taskQueue.Start(unlimitedWorkers)
-
-	// Capture this run's generation before enqueueing anything: everything this
-	// run submits is stamped with the generation it belongs to, and
-	// handleCompletions watches that one rather than whatever generation the
-	// queue happens to be on later. Taken together in one call so the token and
-	// the context cannot describe different generations - see TaskQueue.Current.
-	execGen, execCtx := a.taskQueue.Current()
-
-	task := Task{
-		ID:   startNode.ID,
-		Type: startNode.Type,
-		Data: startNode.Data,
-	}
-	a.taskQueue.Enqueue(execGen, task)
-
-	// Start a goroutine to handle task completions. It starts with one task in
-	// flight: the Start node just enqueued above.
-	go a.handleCompletions(execCtx, execGen)
 
 	return nil
 }
 
-// setGraph installs the node and dependency maps for a new run.
-func (a *App) setGraph(nodeMap map[string]Node, dependencies map[string][]string) {
-	a.graphMux.Lock()
-	defer a.graphMux.Unlock()
-	a.nodeMap = nodeMap
-	a.dependencies = dependencies
+// refuseRun clears the execution state a refused run had already set and
+// returns the error to hand back, so every refusal in startFlow is one line and
+// none of them can forget to leave the app idle.
+func (a *App) refuseRun(err error) error {
+	a.setExecuting(false)
+	log.Printf("startFlow failed: %v", err)
+	return err
 }
 
-// node looks up a node in the current graph.
-func (a *App) node(nodeID string) (Node, bool) {
-	a.graphMux.RLock()
-	defer a.graphMux.RUnlock()
-	node, exists := a.nodeMap[nodeID]
-	return node, exists
+// nodesByIDFrom indexes a flowchart's nodes by id.
+func nodesByIDFrom(flow FlowData) map[string]Node {
+	nodes := make(map[string]Node, len(flow.Nodes))
+	for _, node := range flow.Nodes {
+		nodes[node.ID] = node
+	}
+	return nodes
 }
 
-// nodeCount reports how many nodes the current graph has.
-func (a *App) nodeCount() int {
-	a.graphMux.RLock()
-	defer a.graphMux.RUnlock()
-	return len(a.nodeMap)
+// adjacency is the flowchart as target lists by source, which is the shape
+// reachableFrom reads.
+func adjacency(flow FlowData) map[string][]string {
+	edges := make(map[string][]string)
+	for _, edge := range flow.Edges {
+		edges[edge.Source] = append(edges[edge.Source], edge.Target)
+	}
+	return edges
 }
 
-// dependentsOf returns the IDs of the nodes that run after nodeID. The result
-// is a copy, so callers can use it without holding graphMux.
-func (a *App) dependentsOf(nodeID string) []string {
-	a.graphMux.RLock()
-	defer a.graphMux.RUnlock()
-	return append([]string(nil), a.dependencies[nodeID]...)
-}
+// validateOutputHandles refuses a flowchart that wires two edges to one output
+// handle.
+//
+// An output takes exactly one edge, and fan-out is an explicit Sequence node -
+// the rule Unreal Blueprints uses, and what makes execution order unambiguous
+// there. The editor will not draw a second wire from a handle, but a file can
+// be hand-edited, and the walk is deliberately not made to cope with it: with
+// one edge per handle there is no order to invent for a case the user cannot
+// see.
+//
+// It is a refusal rather than a warning because the alternative is discovering
+// it halfway through a run, with half a macro already typed into whatever the
+// user had focused.
+func validateOutputHandles(flow FlowData) error {
+	// Counted per source, then reported in flowchart order with the handles of
+	// one node sorted, so the same broken file always names the same edge first.
+	perNode := make(map[string]map[string]int, len(flow.Nodes))
+	for _, edge := range flow.Edges {
+		handles, ok := perNode[edge.Source]
+		if !ok {
+			handles = make(map[string]int)
+			perNode[edge.Source] = handles
+		}
+		handles[edge.SourceHandle]++
+	}
 
-// prerequisitesOf returns the IDs of the nodes nodeID depends on.
-func (a *App) prerequisitesOf(nodeID string) []string {
-	a.graphMux.RLock()
-	defer a.graphMux.RUnlock()
-	var deps []string
-	for source, targets := range a.dependencies {
-		for _, target := range targets {
-			if target == nodeID {
-				deps = append(deps, source)
+	for _, node := range flow.Nodes {
+		handles := perNode[node.ID]
+		names := make([]string, 0, len(handles))
+		for handle := range handles {
+			names = append(names, handle)
+		}
+		sort.Strings(names)
+
+		for _, handle := range names {
+			if handles[handle] > 1 {
+				return fmt.Errorf(
+					"node %s has %d edges leaving output %q: an output takes exactly one edge, so fan out with a Sequence node",
+					node.ID, handles[handle], handle)
 			}
 		}
 	}
-	return deps
-}
-
-// drainNotifications empties notifyCh without blocking.
-func (a *App) drainNotifications() {
-	for {
-		select {
-		case taskID := <-a.notifyCh:
-			log.Printf("Discarding stale completion notification for task %s", taskID)
-		default:
-			return
-		}
-	}
+	return nil
 }
 
 // findStartNode locates the StartNode in the flowchart.
@@ -246,10 +259,238 @@ func (a *App) findStartNode(nodes []Node) (Node, error) {
 	return Node{}, errors.New("no Start node found in flowchart")
 }
 
+// =============================================== the walk ===============================================
+
+// maxWalkWithoutYield is the longest the walk may run without giving anything
+// else a turn, and walkYield is the turn it gives.
+//
+// **This is what genuinely replaces the iteration budget for a cycle the loop
+// node does not govern.** The per-iteration yield in actions_loop.go bounds the
+// rate of a loop drawn as the Loop Start / Loop End pair, and the header of
+// interpreter.go used to claim that plus the toggle and the cancellation check
+// covered everything. It does not: nothing yields in a cycle with no Loop Start
+// in it - an ordinary edge drawn backwards, which validateOutputHandles does not
+// refuse and the multipath lint deliberately excludes as a back-edge - nor in a
+// cycle through a Loop Start that always leaves by `done`, because the frame is
+// popped on the way out and the next arrival makes a fresh one with nothing to
+// measure a yield from. Both spin at whatever rate the machine can manage. The
+// toggle still stops them promptly, so neither is an unstoppable run; what is
+// unmitigated without this is exactly the harm the yield exists to prevent - a
+// core pinned at 100%, and an OS input queue filled faster than the target
+// application drains it, which the user then watches empty long after they
+// pressed stop.
+//
+// The shape is Scratch's, as docs/control-flow-next-steps.md recommends under
+// "Yield discipline": keep the declared yield points where they are, and add a
+// wall-clock bound on running without reaching one. Scratch calls its bound
+// WARP_TIME and sets it to 500ms; the same value is right here for the same
+// reason - it is short enough that a runaway cycle cannot outrun the input queue
+// by much, and long enough that it is never reached by a macro doing anything
+// real. A tighter bound would start costing macros that are behaving.
+//
+// walkYield is minLoopIterationYield, and deliberately the same size of gap for
+// the same reason: one turn of ~10ms is above any rate a person can tell from
+// instant, and is what the OS input queue needs to be given rather than a number
+// tuned here. So a runaway cycle costs 10ms per 500ms - a 2% duty cycle on the
+// bound, and the difference between "as fast as the machine" and "a hundred
+// nodes a second" for everything downstream.
+const (
+	maxWalkWithoutYield = 500 * time.Millisecond
+	walkYield           = minLoopIterationYield
+)
+
+// walk drives a run to its end. It is the goroutine Runner.Go tracks, and it
+// is deliberately thin: check the context, take one step, repeat. Everything
+// else is on the run.
+//
+// The cancellation check here is what "checked between every node" means for
+// the gap between one node finishing and the next starting; step makes the
+// other half of the check, between a handler returning and its edges being
+// followed. Together they mean a loop of instantaneous nodes stops promptly.
+//
+// It takes no lock of the App's, and must not: StopExecution holds execMutex
+// across Runner.Stop, which waits for this goroutine to return.
+func (a *App) walk(ctx context.Context, r *run) {
+	// finishing says the ordinary exit path has already committed to finishRun.
+	// It is what lets the recover below tell a panic in the walk from a panic
+	// inside finishRun itself, and not answer the second by calling finishRun
+	// again: re-entering the function that has just panicked would very likely
+	// panic again, and a second panic while a deferred recover is running is the
+	// process, not a recovered run.
+	finishing := false
+
+	// The same guard startFlow has, on this side of the goroutine boundary,
+	// where it now matters more: a panic here would otherwise take down an app
+	// that is meant to sit in the tray for weeks. Individual handlers are
+	// already guarded inside executeTask, so what this catches is a bug in the
+	// walk itself - and it must still leave the app idle rather than stuck
+	// reporting a run that is over.
+	//
+	// **And it must let go of the keyboard.** A panicked run is a run that
+	// ended without being asked to, so a Ctrl a Hold node left down is left down
+	// over every window the user touches next - which is the exact failure
+	// releaseHeldKeys was added to prevent, on the one path that used to skip it.
+	// This used to clear the flag and return, reaching neither finishRun nor the
+	// release inside it; now it names the outcome and goes through finishRun like
+	// every other ending. runPanicked rather than runCancelled because nobody
+	// cancelled anything, and the frontend has already been told by the
+	// execution-error above - a second ending event would report the run twice.
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("Recovered from panic in the walk: %v", p)
+			a.emitEvent("execution-error", fmt.Sprintf("panic: %v", p))
+
+			if finishing {
+				// The panic came out of finishRun. The release is idempotent, so
+				// doing it here costs nothing and covers the case where finishRun
+				// died before reaching it. Cleared last, for the reason in
+				// finishRun.
+				r.state.releaseHeldKeys()
+				a.setExecuting(false)
+				return
+			}
+
+			r.outcome = runPanicked
+			a.finishRun(r)
+		}
+	}()
+
+	// The wall-clock bound above, in the one place that sees every node: what it
+	// measures is time spent walking without anything having given way, so it is
+	// reset by anything that did. A step that took at least a yield's worth of
+	// wall time has already produced the gap the yield exists to create - it
+	// blocked in waitInterruptible, in the loop's per-iteration yield or on the
+	// colour poll's ticker, or it did that much real work, and in either case
+	// forcing another 10ms on top of it would buy nothing. That is what keeps a
+	// macro with real delays in it from paying anything at all for this.
+	lastYield := time.Now()
+
+	for {
+		if ctx.Err() != nil {
+			r.outcome = runCancelled
+			break
+		}
+
+		if time.Since(lastYield) >= maxWalkWithoutYield {
+			// waitInterruptible rather than a sleep, for the reason the loop's
+			// yield uses it: this must never be the thing that delays a stop.
+			if !waitInterruptible(ctx, walkYield) {
+				r.outcome = runCancelled
+				break
+			}
+			lastYield = time.Now()
+		}
+
+		started := time.Now()
+		if _, ok := r.step(ctx); !ok {
+			break
+		}
+		if time.Since(started) >= walkYield {
+			lastYield = time.Now()
+		}
+	}
+
+	finishing = true
+	a.finishRun(r)
+}
+
+// executeNode runs one node and reports which output the token leaves it by.
+// It is the exec a real run is built with.
+//
+// The task-started and task-completed events are emitted here, around the
+// handler: the frontend's status panel and run marks listen for them, and one
+// pair per node executed is what they expect.
+//
+// The task arrives built - the walk assembles it, because the wired output
+// handles on it are a property of the graph rather than of the node - and the
+// run state is passed straight through to the handler. Neither is fetched from
+// the App: the state belongs to one run, and an App that could hand it out
+// would be the leftovers hazard the run state was put on the run to avoid.
+func (a *App) executeNode(ctx context.Context, task Task, state *runState) (string, error) {
+	log.Printf("Processing task %s of type %s", task.ID, task.Type)
+	a.emitEvent("task-started", task.ID)
+
+	next, err := executeTask(ctx, task, state, a)
+
+	a.emitEvent("task-completed", task.ID)
+	return next, err
+}
+
+// finishRun reports how the run ended and then clears the execution state.
+//
+// This is the only place a run's ending is announced. StopExecution used to
+// emit execution-stopped as well, which made every user stop report itself
+// twice - and, when the stop landed just after the walk had finished by itself,
+// report both a completion and a stop for one run. The walk is the side that
+// knows *how* the run ended, so it owns the event.
+//
+// The order matters and is the opposite of the obvious one. setExecuting is not
+// a bare atomic store: it also disables twenty-odd tray menu items, each a Win32
+// call. Clearing first would open a window in which startFlow's guard already
+// says "idle" - so a hotkey could start run B - while run A's
+// execution-completed has not gone out yet, and the frontend would apply A's
+// ending to B, wiping B's run marks mid-macro. Announcing first closes it: a run
+// that can be started is a run whose predecessor has already been reported.
+//
+// The run state goes out of scope with r. It is not cleared anywhere, because
+// there is nowhere it could have been left behind - with one thing to do first:
+// a run that ended without choosing to, cancelled or panicked, lets go of any
+// key a Hold node left down, below.
+//
+// It is reached from both of the walk's exits - the ordinary one and its
+// recover - so every ending goes through this switch and none of them can be the
+// one that skips the release.
+func (a *App) finishRun(r *run) {
+	switch r.outcome {
+	case runFinished:
+		log.Printf("Execution finished after %d node(s)", r.steps)
+		a.emitEvent("execution-completed", nil)
+	case runCancelled:
+		// Before the event and before the flag, because this is physical: the
+		// keystroke that stopped the macro arrived while the macro may have had
+		// modifiers down, and a Ctrl left held affects every window the user
+		// touches next. Only on an ending the macro did not choose - a macro that
+		// ends normally having deliberately left a key held is the documented
+		// behaviour of the Hold action. See releaseHeldKeys.
+		r.state.releaseHeldKeys()
+		log.Printf("Execution stopped after %d node(s)", r.steps)
+		a.emitEvent("execution-stopped", nil)
+	case runPanicked:
+		// The same release, for the same physical reason and with more cause: a
+		// run that died mid-macro chose nothing about where it stopped, so
+		// whatever it was holding is held for no reason at all.
+		//
+		// No event. App.walk's recover has already emitted execution-error, which
+		// is what the frontend clears its run marks on; announcing an ending here
+		// as well would report one run twice, which is the duplication finishRun
+		// was made the only announcer to end.
+		r.state.releaseHeldKeys()
+		log.Printf("Execution ended in a panic after %d node(s)", r.steps)
+	case runInProgress:
+		// Unreachable: walk only calls this once the run has ended, and every
+		// exit sets an outcome. Spelled out rather than folded into a default,
+		// so that this switch reads as the list of every way a run can end and a
+		// new one that nobody reported is visible as a missing case - nothing
+		// checks that for us.
+		log.Printf("Execution ended without an outcome after %d node(s)", r.steps)
+	}
+
+	a.setExecuting(false)
+}
+
+// =============================================== the lints ===============================================
+
 // reachableFrom walks the flow forwards from startID and returns the set of
 // node IDs execution can get to. Edges pointing at IDs that are not in nodes
 // are ignored, and a node is only ever expanded once, so a cycle terminates
 // the walk instead of spinning in it.
+//
+// It no longer decides what runs. The interpreter runs a node when the token
+// arrives at it, so a node with no path from Start is never reached and needs
+// no pruning. What it still answers is exactly the question the editor wants -
+// "is this node wired to anything that leads to it?" - which is what
+// warnAboutSkippedNodes reports and what the frontend's own copy of this walk
+// (nodeLabels.ts) orders the status panel by.
 func reachableFrom(startID string, edges map[string][]string, nodes map[string]Node) map[string]bool {
 	reachable := make(map[string]bool)
 	if _, exists := nodes[startID]; !exists {
@@ -313,233 +554,245 @@ func (a *App) warnAboutSkippedNodes(flowData FlowData, reachable map[string]bool
 	a.emitEvent("execution-nodes-skipped", skipped)
 }
 
-// notifyTaskCompletion is called by TaskQueue workers when a task is completed.
+// warnAboutMultipathNodes tells the frontend which nodes the run reaches by
+// more than one path, and therefore runs more than once.
 //
-// The send blocks rather than dropping the notification: a dropped completion
-// would leave every dependent node permanently unqueued and hang the macro.
-// ctx is the worker's generation context, so a stopped queue still unblocks
-// the send instead of wedging the worker (and with it TaskQueue.Stop).
-func (a *App) notifyTaskCompletion(ctx context.Context, taskID string) {
-	select {
-	case a.notifyCh <- taskID:
-		log.Printf("Task %s completion notified", taskID)
-	case <-ctx.Done():
-		log.Printf("Execution canceled. Dropping completion of task %s", taskID)
+// Reported in flowchart order, and as ids rather than prose, for the same
+// reasons as the skipped-node warning next to it.
+func (a *App) warnAboutMultipathNodes(flowData FlowData, startID string) {
+	multipath := multipathNodes(flowData, startID)
+	if len(multipath) == 0 {
+		return
 	}
+
+	log.Printf("%d node(s) are reachable from Start by more than one path and will run more than once: %s",
+		len(multipath), strings.Join(multipath, ", "))
+	a.emitEvent("execution-nodes-multipath", multipath)
 }
 
-// handleCompletions listens for completed tasks and enqueues dependent tasks.
-// ctx and gen are the task queue context and generation of the run it was
-// started for, captured together by startFlow. Every task this goroutine
-// submits carries gen, so work belonging to a run that has since been stopped
-// is refused by the queue rather than executed by whatever run came next.
+// multipathNodes lists the nodes reachable from Start by more than one path, in
+// flowchart order.
 //
-// It also detects a deadlocked run. The engine only ever enqueues work in
-// reaction to a completion, so once nothing is in flight - nothing queued,
-// nothing being executed - no further completion can arrive and no further
-// task can be enqueued. If the run has not finished at that point it never
-// will, and that is a real stall: a cycle, or a node whose prerequisites can
-// no longer all be satisfied.
+// Defined as: a node with two or more incoming edges whose source is reachable
+// from Start, counting only edges that are not back-edges.
 //
-// That is deliberately not a timer. Elapsed quiet time cannot tell a wedged
-// run from a Delay node that was asked to sleep for half an hour, and the
-// timer this replaces would abort the latter. The in-flight count is exact:
-// it reports the deadlock the moment it becomes one, and it never interrupts
-// a task that is simply taking its time.
+// What it catches is two unrelated branches joining into one node - an easy
+// accident, and one whose consequence (the node, and everything after it, runs
+// twice) is invisible on the canvas. It is not a warning about diamonds as
+// such: an output handle takes one edge, so a diamond cannot be drawn by
+// accident at all - it takes a deliberate Sequence node wired to a common
+// target, which is a thing a user might well mean.
 //
-// inFlight is owned by this goroutine alone - every enqueue for the run
-// happens here, apart from the Start node that StartExecution enqueues just
-// before starting this goroutine, which is what it counts to begin with - so
-// it needs no lock of its own.
-func (a *App) handleCompletions(ctx context.Context, gen uint64) {
-	inFlight := 1
+// Back-edges are excluded, and that is not decoration. Phase 4 makes a loop an
+// edge pointing backwards, and a loop header has two incoming edges by
+// construction - the one that enters the loop and the one that comes round
+// again - so without the exclusion every loop a user draws would be reported as
+// a mistake.
+//
+// **A hand-drawn back edge is excluded too, and is not reported anywhere else.**
+// The editor owns the loop pair's back edge, but nothing stops a user wiring a
+// Branch's `false` output to an earlier node, and that cycle is invisible to
+// every lint here. Its rate is bounded (maxWalkWithoutYield, above) and the
+// toggle stops it, so it is not dangerous - it is merely undeclared, and a user
+// who drew it by accident is told nothing. Reporting it would be a third warning
+// beside these two: the classification below already knows which edges are
+// back-edges, so what it needs is to keep the ones whose source is not a
+// LoopEndNode leaving by `back`, and a frontend listener to name them. It is not
+// built because the payload is the open question - these two warnings carry node
+// ids, and the frontend labels nodes, while what a user needs pointed at here is
+// an *edge*.
+//
+// They are classified by a depth-first search from Start: an edge whose target
+// is on the DFS stack when the edge is examined points at an ancestor of its
+// source, which is what a back-edge is. The search follows a node's outgoing
+// edges in the order the flowchart lists them, which is what makes the answer
+// reproducible - it is also the rule the fixtures in testdata/walk are written
+// against.
+//
+// Edges pointing into the Start node are ignored: it runs unconditionally,
+// whatever is wired to it.
+func multipathNodes(flow FlowData, startID string) []string {
+	nodes := nodesByIDFrom(flow)
+	if _, ok := nodes[startID]; !ok {
+		return nil
+	}
 
-	for {
-		select {
-		case taskID := <-a.notifyCh:
-			// Both cases of this select can be ready at once and Go picks one
-			// at random, so re-check cancellation before acting on the
-			// completion - the same guard, for the same reason, as the one in
-			// TaskQueue.worker.
-			//
-			// It is load-bearing rather than merely tidy. This branch runs its
-			// whole body without consulting ctx again, and this goroutine is
-			// not tracked by the queue's WaitGroup, so Stop does not wait for
-			// it: a run that was stopped while one of its completions was in
-			// flight would otherwise carry on keeping books for a run that is
-			// over - decrementing inFlight, marking nodes completed, and
-			// reporting execution-completed for a macro the user stopped.
-			//
-			// It is not what keeps a stopped run's work from executing. The
-			// generation token does that, at the queue itself, and covers the
-			// case this cannot: cancellation observed here still leaves a
-			// window before the Enqueue below. See TaskQueue.Enqueue.
-			if ctx.Err() != nil {
-				a.setExecuting(false)
-				log.Printf("Execution stopped; discarding completion of task %s", taskID)
-				a.emitEvent("execution-stopped", nil)
-				return
+	// Edge indices by source, in flowchart order, so an edge can be identified
+	// again once the search has classified it.
+	outgoing := make(map[string][]int, len(flow.Edges))
+	for i, edge := range flow.Edges {
+		if _, ok := nodes[edge.Source]; !ok {
+			continue
+		}
+		if _, ok := nodes[edge.Target]; !ok {
+			continue
+		}
+		outgoing[edge.Source] = append(outgoing[edge.Source], i)
+	}
+
+	backEdge := make(map[int]bool)
+	visited := make(map[string]bool)
+	onStack := make(map[string]bool)
+
+	var search func(id string)
+	search = func(id string) {
+		visited[id] = true
+		onStack[id] = true
+		for _, i := range outgoing[id] {
+			target := flow.Edges[i].Target
+			switch {
+			case onStack[target]:
+				backEdge[i] = true
+			case !visited[target]:
+				search(target)
 			}
+		}
+		onStack[id] = false
+	}
+	search(startID)
 
-			// The completion count is compared against the size of this run's
-			// graph, so only count tasks that belong to it. Nothing outside
-			// the graph is ever enqueued; this just keeps a stray completion
-			// from an earlier run from inflating the count and declaring the
-			// current one finished early.
-			if _, partOfRun := a.node(taskID); !partOfRun {
-				log.Printf("Ignoring completion of task %s: not part of the current run", taskID)
-				continue
-			}
-			inFlight--
+	arrivals := make(map[string]int, len(nodes))
+	for i, edge := range flow.Edges {
+		if backEdge[i] || edge.Target == startID || !visited[edge.Source] {
+			continue
+		}
+		if _, ok := nodes[edge.Target]; !ok {
+			continue
+		}
+		arrivals[edge.Target]++
+	}
 
-			a.completedMux.Lock()
-			a.completed[taskID] = true
-			completedCount := len(a.completed)
-			a.completedMux.Unlock()
-			log.Printf("Task %s marked as completed", taskID)
-
-			// Find dependent tasks
-			dependents := a.dependentsOf(taskID)
-			for _, depID := range dependents {
-				if a.canEnqueue(depID) {
-					node, exists := a.node(depID)
-					if !exists {
-						log.Printf("Node ID %s not found in nodeMap", depID)
-						continue
-					}
-					task := Task{
-						ID:   node.ID,
-						Type: node.Type,
-						Data: node.Data,
-					}
-					a.taskQueue.Enqueue(gen, task)
-					inFlight++
-				}
-			}
-
-			// Check if all tasks are completed. Compared with >= rather than
-			// ==: an exact match is a single point the run has to hit, and
-			// missing it costs a hang.
-			if completedCount >= a.nodeCount() {
-				a.setExecuting(false)
-				a.emitEvent("execution-completed", nil)
-				log.Println("All tasks completed. Execution finished.")
-				return
-			}
-
-			// Nothing left running and nothing left to start, yet the run is
-			// not finished: it can never make progress again.
-			if inFlight == 0 {
-				a.reportStall()
-				return
-			}
-		case <-ctx.Done():
-			a.setExecuting(false)
-			log.Println("Execution stopped due to task queue cancellation")
-			a.emitEvent("execution-stopped", nil)
-			return
+	multipath := make([]string, 0, len(nodes))
+	for _, node := range flow.Nodes {
+		if arrivals[node.ID] > 1 {
+			multipath = append(multipath, node.ID)
 		}
 	}
+	return multipath
 }
 
-// reportStall ends a run that can no longer make progress and tells the user
-// which nodes were left behind.
-//
-// The queue is deliberately left running: nothing is in flight, so there is
-// nothing to shut down, and the next run reuses the same worker generation
-// exactly as it does after a run that finished normally.
-func (a *App) reportStall() {
-	a.setExecuting(false)
-
-	stuck := a.pendingNodeIDs()
-	log.Printf("Execution cannot continue: %d node(s) never became runnable: %s",
-		len(stuck), strings.Join(stuck, ", "))
-	// IDs rather than a sentence, for the same reason as the skipped-node
-	// warning: the frontend owns how a node is named on screen.
-	a.emitEvent("execution-stalled", stuck)
-}
-
-// pendingNodeIDs lists the nodes of the current run that have not completed,
-// sorted so the same stall always reports the same way.
-func (a *App) pendingNodeIDs() []string {
-	// Snapshot the graph and release graphMux before taking completedMux: the
-	// two locks are never held at the same time.
-	a.graphMux.RLock()
-	ids := make([]string, 0, len(a.nodeMap))
-	for id := range a.nodeMap {
-		ids = append(ids, id)
-	}
-	a.graphMux.RUnlock()
-
-	a.completedMux.Lock()
-	pending := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if !a.completed[id] {
-			pending = append(pending, id)
-		}
-	}
-	a.completedMux.Unlock()
-
-	sort.Strings(pending)
-	return pending
-}
-
-// canEnqueue checks if all dependencies of a node are met.
-func (a *App) canEnqueue(nodeID string) bool {
-	// Read the graph first and release graphMux before taking completedMux,
-	// so the two locks are never held at the same time.
-	deps := a.prerequisitesOf(nodeID)
-
-	a.completedMux.Lock()
-	defer a.completedMux.Unlock()
-	for _, dep := range deps {
-		if !a.completed[dep] {
-			return false
-		}
-	}
-	return true
-}
+// =============================================== execution state ===============================================
 
 // StopExecution stops the ongoing execution.
+//
+// execMutex is held for the whole of it, including across Runner.Stop's wait
+// for the walk goroutine, so that a new run cannot begin while the stopped one
+// is still winding down. That is safe only because the walk takes no lock of
+// the App's: it emits its last event and clears the execution state through an
+// atomic, and neither touches execMutex. A walk that reached for it would
+// deadlock against the wait below, which is the shape this whole lifecycle is
+// arranged to avoid.
+//
+// Stop and not Close: this is the user pressing stop, and the next macro they
+// start has to work. ServiceShutdown is the caller that means it terminally.
+//
+// The runner is stopped unconditionally rather than only when a run reports
+// itself in progress. "Not executing" is not the same as "no goroutine left":
+// the walk clears the flag as its last act, so a stop pressed in that instant
+// would otherwise return while the goroutine it is supposed to have joined is
+// still alive. Stop with nothing running waits, does not cancel and leaves the
+// generation alone, so the unconditional call costs a lock and a satisfied
+// WaitGroup.
+//
+// It emits nothing. The run announces its own ending from finishRun, which is
+// the side that knows whether it was stopped or finished by itself; emitting
+// here as well reported every stop twice.
+//
+// A closed runner is declined outright, for the reason startFlow declines one:
+// setExecuting writes twenty-odd tray menu items, and doing that once
+// ServiceShutdown has returned means writing them while the main thread destroys
+// the menu they belong to - systray.destroy() runs immediately after the
+// shutdown hook. A stop click already in flight when the user quits is exactly
+// how that happens: it races ServiceShutdown for execMutex and may well lose.
+// There is nothing left for it to do anyway - the run it meant to stop was
+// cancelled and waited for by Runner.Close.
+//
+// Declining, not Close. This is the user pressing stop, and Close would leave
+// the runner refusing their next macro.
 func (a *App) StopExecution() {
 	a.execMutex.Lock()
 	defer a.execMutex.Unlock()
 
-	if !a.isExecuting {
-		log.Println("StopExecution called but no execution is in progress")
+	a.stopLocked()
+}
+
+// stopIfRunning is StopExecution for the toggle: it stops a run only if there
+// is one, and reports whether it did.
+//
+// The check and the stop are one critical section, which is the whole reason it
+// is not two calls at the call site. Between an unlocked GetIsExecuting and a
+// StopExecution that takes the lock for itself, a run could end by itself and
+// the next one begin - and the toggle would stop a macro the user had just
+// started rather than the one they meant.
+//
+// A closed runner cannot reach stopLocked's refusal from here, and that is
+// worth stating because the two functions read as though it could. ServiceShutdown
+// clears the executing flag under execMutex after Runner.Close, so a stop that
+// lands after shutdown finds the app idle and returns false at the check above -
+// which is what TestRunMacroIsRefusedAfterServiceShutdown asserts, and it is the
+// right answer for the caller either way: there is no run left for RunMacro to
+// stop, and no run for it to start.
+func (a *App) stopIfRunning() bool {
+	a.execMutex.Lock()
+	defer a.execMutex.Unlock()
+
+	if !a.GetIsExecuting() {
+		return false
+	}
+	a.stopLocked()
+	return true
+}
+
+// stopLocked is the body of StopExecution. Callers must hold execMutex.
+//
+// Split out so the toggle can decide and stop under one acquisition of the
+// lock; the reasoning for everything it does is on StopExecution above.
+//
+// Its log lines name no function, and that is deliberate now that there are two
+// callers. They used to say "StopExecution called ...", which was true when
+// StopExecution was the only way in; a hotkey press that toggles a run off comes
+// through stopIfRunning, and a log line naming a function the user did not
+// invoke sends the next person reading it looking for a frontend Stop click that
+// never happened.
+func (a *App) stopLocked() {
+	if a.runner.Closed() {
+		log.Println("A stop was requested while the app is shutting down")
 		return
 	}
 
-	a.taskQueue.Stop()
-	// execMutex is held for the whole function, so use the locked variant.
-	a.setExecutingLocked(false)
-	a.emitEvent("execution-stopped", nil)
+	wasExecuting := a.GetIsExecuting()
+
+	a.runner.Stop()
+	a.setExecuting(false)
+
+	if !wasExecuting {
+		log.Println("A stop was requested but no execution is in progress")
+		return
+	}
 	log.Println("Execution has been stopped by the user")
 }
 
 // setExecuting updates the execution state.
+//
+// The flag is atomic rather than guarded by execMutex, and that is load-bearing
+// rather than a micro-optimisation: the walk goroutine clears it as it exits,
+// and StopExecution waits for that goroutine while holding execMutex. If this
+// took the lock, those two would deadlock on each other.
+//
+// The tray update is safe from any goroutine in the sense that matters here -
+// the tray only touches its own menu items and never calls back into the
+// execution engine, so there is no lock cycle. It is not synchronised against
+// refreshMacros, which writes other fields of the same Wails menu items from
+// whichever goroutine saved a project; that race predates the interpreter and
+// lives in Wails' own structs rather than in anything this package owns, but it
+// is not something this comment should be read as covering.
 func (a *App) setExecuting(state bool) {
-	a.execMutex.Lock()
-	a.isExecuting = state
-	a.execMutex.Unlock()
+	a.isExecuting.Store(state)
 	log.Printf("Execution state set to: %v", state)
-	a.tray.setExecuting(state)
-}
-
-// setExecutingLocked updates the execution state and must only be called with
-// execMutex already held. sync.Mutex is not reentrant, so callers that already
-// hold the lock must use this instead of setExecuting.
-func (a *App) setExecutingLocked(state bool) {
-	a.isExecuting = state
-	log.Printf("Execution state set to: %v", state)
-	// Safe under execMutex: the tray only touches its own menu items and never
-	// calls back into the execution engine.
 	a.tray.setExecuting(state)
 }
 
 // GetIsExecuting returns the current execution state.
 func (a *App) GetIsExecuting() bool {
-	a.execMutex.Lock()
-	defer a.execMutex.Unlock()
-	return a.isExecuting
+	return a.isExecuting.Load()
 }

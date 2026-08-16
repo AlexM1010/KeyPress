@@ -69,6 +69,33 @@ export function LoadProject(id: string): $CancellablePromise<$models.FlowData | 
  * 
  * It is bound to the frontend as well, so the projects list can run a macro
  * without opening it in the workspace first.
+ * 
+ * **It is a toggle.** A run in progress is stopped and nothing is started; only
+ * an idle app starts one. This is AutoHotkey's canonical `Toggle := !Toggle`,
+ * expressed with the context cancellation this app already has instead of a
+ * shared flag, and it is what makes an endless loop a usable macro rather than
+ * a trap: with the iteration budget gone, the hotkey the user pressed to start
+ * a loop is the way out of it. The re-entrancy hazard those threads keep
+ * hitting - a second press landing inside the first press's still-running loop
+ * - is commit 33797cb's bug, and the runner's generation token is what stays to
+ * make this safe.
+ * 
+ * **startFlow deliberately keeps its refusal**, and the toggle lives only here.
+ * The two entry points want different answers. This one is a hotkey or a tray
+ * item: one chord, no second key, and the user pressing it while a macro runs
+ * can only mean stop. StartExecution is the workspace's Run button, which sits
+ * next to a Stop button - a user who wants to stop presses that, and a Run
+ * press that silently stopped the run would be indistinguishable from one that
+ * started a fresh one. So the shared start path still reports "execution
+ * already in progress" and TestStartFlowRefusesASecondRun stays valid.
+ * 
+ * The stop and the start are not one atomic operation, and cannot be while
+ * startFlow takes execMutex itself. What is left is the window between finding
+ * the app idle and startFlow claiming it, in which a second press could load
+ * its macro and then be refused by startFlow's guard - which is exactly what a
+ * double-press does today, reported the same way. Nothing new is possible in
+ * it: the two presses cannot both start a run, because the refusal is under the
+ * same lock as the claim.
  */
 export function RunMacro(id: string): $CancellablePromise<void> {
     return $Call.ByID(2292765930, id);
@@ -135,6 +162,41 @@ export function StartExecution(flow: string): $CancellablePromise<void> {
 
 /**
  * StopExecution stops the ongoing execution.
+ * 
+ * execMutex is held for the whole of it, including across Runner.Stop's wait
+ * for the walk goroutine, so that a new run cannot begin while the stopped one
+ * is still winding down. That is safe only because the walk takes no lock of
+ * the App's: it emits its last event and clears the execution state through an
+ * atomic, and neither touches execMutex. A walk that reached for it would
+ * deadlock against the wait below, which is the shape this whole lifecycle is
+ * arranged to avoid.
+ * 
+ * Stop and not Close: this is the user pressing stop, and the next macro they
+ * start has to work. ServiceShutdown is the caller that means it terminally.
+ * 
+ * The runner is stopped unconditionally rather than only when a run reports
+ * itself in progress. "Not executing" is not the same as "no goroutine left":
+ * the walk clears the flag as its last act, so a stop pressed in that instant
+ * would otherwise return while the goroutine it is supposed to have joined is
+ * still alive. Stop with nothing running waits, does not cancel and leaves the
+ * generation alone, so the unconditional call costs a lock and a satisfied
+ * WaitGroup.
+ * 
+ * It emits nothing. The run announces its own ending from finishRun, which is
+ * the side that knows whether it was stopped or finished by itself; emitting
+ * here as well reported every stop twice.
+ * 
+ * A closed runner is declined outright, for the reason startFlow declines one:
+ * setExecuting writes twenty-odd tray menu items, and doing that once
+ * ServiceShutdown has returned means writing them while the main thread destroys
+ * the menu they belong to - systray.destroy() runs immediately after the
+ * shutdown hook. A stop click already in flight when the user quits is exactly
+ * how that happens: it races ServiceShutdown for execMutex and may well lose.
+ * There is nothing left for it to do anyway - the run it meant to stop was
+ * cancelled and waited for by Runner.Close.
+ * 
+ * Declining, not Close. This is the user pressing stop, and Close would leave
+ * the runner refusing their next macro.
  */
 export function StopExecution(): $CancellablePromise<void> {
     return $Call.ByID(3372805249);

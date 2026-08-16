@@ -1,0 +1,60 @@
+{
+  "description": "A Branch inside an inner loop's body, wired to the outer loop's Loop End rather than to the inner loop's, is control leaving that loop by a route other than its own `done` output. The pair narrows this - nobody draws the back edge any more - but it does not remove it, because wiring a branch out of a body is an ordinary thing to draw. The outer loop's next iteration re-enters the inner loop, which must count from zero again: arriving at a Loop Start unwinds every frame above it, so the escaped inner frame dies there. Its count of one is what makes the difference visible - a leaked frame would find it already spent and leave by `done` straight away, skipping the branch. The lint reports `outerEnd`, which two live paths really do join at.",
+  "flow": {
+    "nodes": [
+      { "id": "start", "type": "StartNode", "position": { "x": 0, "y": 0 }, "data": {} },
+      {
+        "id": "outer",
+        "type": "LoopStartNode",
+        "position": { "x": 200, "y": 0 },
+        "data": { "count": 2, "loopId": "outer-loop" }
+      },
+      {
+        "id": "inner",
+        "type": "LoopStartNode",
+        "position": { "x": 400, "y": 0 },
+        "data": { "count": 1, "loopId": "inner-loop" }
+      },
+      { "id": "escape", "type": "BranchNode", "position": { "x": 600, "y": 0 }, "data": {} },
+      {
+        "id": "innerEnd",
+        "type": "LoopEndNode",
+        "position": { "x": 800, "y": 0 },
+        "data": { "loopId": "inner-loop" }
+      },
+      {
+        "id": "outerEnd",
+        "type": "LoopEndNode",
+        "position": { "x": 800, "y": 200 },
+        "data": { "loopId": "outer-loop" }
+      },
+      { "id": "after", "type": "DelayNode", "position": { "x": 200, "y": 400 }, "data": {} }
+    ],
+    "edges": [
+      { "id": "e1", "source": "start", "target": "outer", "sourceHandle": "right" },
+      { "id": "e2", "source": "outer", "target": "inner", "sourceHandle": "body" },
+      { "id": "e3", "source": "inner", "target": "escape", "sourceHandle": "body" },
+      { "id": "e4", "source": "escape", "target": "outerEnd", "sourceHandle": "true" },
+      { "id": "e5", "source": "escape", "target": "innerEnd", "sourceHandle": "false" },
+      { "id": "e6", "source": "innerEnd", "target": "inner", "sourceHandle": "back" },
+      { "id": "e7", "source": "inner", "target": "outerEnd", "sourceHandle": "done" },
+      { "id": "e8", "source": "outerEnd", "target": "outer", "sourceHandle": "back" },
+      { "id": "e9", "source": "outer", "target": "after", "sourceHandle": "done" }
+    ]
+  },
+  "outputs": { "escape": "true" },
+  "visits": [
+    "start",
+    "outer",
+    "inner",
+    "escape",
+    "outerEnd",
+    "outer",
+    "inner",
+    "escape",
+    "outerEnd",
+    "outer",
+    "after"
+  ],
+  "multipath": ["outerEnd"]
+}
