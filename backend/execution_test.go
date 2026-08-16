@@ -177,7 +177,7 @@ func completedIDs(app *App) []string {
 	return ids
 }
 
-//=============================================== reachableFrom ===============================================
+// =============================================== reachableFrom ===============================================
 
 func TestReachableFromWalksTheFlowForwards(t *testing.T) {
 	nodes := nodesByID("start", "a", "b", "c")
@@ -267,7 +267,7 @@ func TestReachableFromAStartIDThatIsNotANodeReachesNothing(t *testing.T) {
 	}
 }
 
-//=============================================== the shared reachability fixtures ===============================================
+// =============================================== the shared reachability fixtures ===============================================
 
 // reachabilityFixtureDir holds the graphs this suite shares with the frontend.
 // See the README in it: the same files are read by
@@ -401,7 +401,7 @@ func loadReachabilityFixture(t *testing.T, path string) reachabilityFixture {
 	return fixture
 }
 
-//=============================================== findStartNode ===============================================
+// =============================================== findStartNode ===============================================
 
 func TestFindStartNodeReturnsTheFirstStartNode(t *testing.T) {
 	app := newTestApp(t)
@@ -432,7 +432,7 @@ func TestFindStartNodeWithoutOne(t *testing.T) {
 	}
 }
 
-//=============================================== the dependency graph ===============================================
+// =============================================== the dependency graph ===============================================
 
 func TestDependentsOfListsWhatRunsNext(t *testing.T) {
 	app := newTestApp(t)
@@ -539,7 +539,7 @@ func TestPendingNodeIDsIsEmptyWhenEverythingIsDone(t *testing.T) {
 	}
 }
 
-//=============================================== drainNotifications ===============================================
+// =============================================== drainNotifications ===============================================
 
 func TestDrainNotificationsEmptiesTheChannel(t *testing.T) {
 	app := newTestApp(t)
@@ -582,7 +582,7 @@ func drainedWithin(t *testing.T, app *App) {
 	}
 }
 
-//=============================================== warnAboutSkippedNodes ===============================================
+// =============================================== warnAboutSkippedNodes ===============================================
 
 // Only nodes that are wired to something are reported: one the user has just
 // dropped on the canvas is a normal editing state, not a surprise. The order is
@@ -629,7 +629,7 @@ func TestWarnAboutSkippedNodesSaysNothingWhenEverythingRuns(t *testing.T) {
 	}
 }
 
-//=============================================== startFlow ===============================================
+// =============================================== startFlow ===============================================
 
 func TestStartExecutionRejectsInvalidJSON(t *testing.T) {
 	app := newTestApp(t)
@@ -810,7 +810,7 @@ func TestStartFlowReportsAStallOnACyclicGraph(t *testing.T) {
 	}
 }
 
-//=============================================== RunMacro ===============================================
+// =============================================== RunMacro ===============================================
 
 // The tray and the global hotkeys have no frontend to get a graph from, so they
 // run a macro straight off disk.
@@ -850,7 +850,7 @@ func TestRunMacroOnAMacroThatIsNotThere(t *testing.T) {
 	}
 }
 
-//=============================================== handleCompletions ===============================================
+// =============================================== handleCompletions ===============================================
 
 // A completion for a task that is not in this run's graph must not count
 // towards it, or a stray notification from an earlier run declares the current
@@ -862,7 +862,7 @@ func TestHandleCompletionsIgnoresATaskFromOutsideTheRun(t *testing.T) {
 	app.setGraph(nodesByID("only"), nil)
 	app.setExecuting(true)
 	runGen, runCtx := app.taskQueue.Current()
-	go app.handleCompletions(runGen, runCtx)
+	go app.handleCompletions(runCtx, runGen)
 
 	app.notifyCh <- "stranger"
 	app.notifyCh <- "only"
@@ -895,7 +895,7 @@ func TestHandleCompletionsEndsTheRunWhenTheQueueIsCancelled(t *testing.T) {
 	// rather than by stopping the queue. The generation is the live one: this
 	// test is about ctx ending the run, not about a stale token.
 	ctx, cancel := context.WithCancel(context.Background())
-	go app.handleCompletions(currentGeneration(app.taskQueue), ctx)
+	go app.handleCompletions(ctx, currentGeneration(app.taskQueue))
 	cancel()
 
 	waitFor(t, testTimeout, "the run to report itself stopped", func() bool {
@@ -910,7 +910,7 @@ func TestHandleCompletionsEndsTheRunWhenTheQueueIsCancelled(t *testing.T) {
 	}
 }
 
-//=============================================== StopExecution ===============================================
+// =============================================== StopExecution ===============================================
 
 func TestStopExecutionWithNothingRunningLeavesTheQueueAlone(t *testing.T) {
 	app := newTestApp(t)

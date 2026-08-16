@@ -283,6 +283,9 @@ func removeRenamedFile(openID string, newPath string) string {
 // other error is a genuine write failure.
 func writeMacroFile(fullPath string, data []byte, replacing bool) error {
 	if !replacing {
+		//nolint:gosec // G304: the only caller passes projectPath's output, so
+		// fullPath is a validated bare id inside the app data directory. The
+		// 0644 is deliberate - see the Chmod below and its comment.
 		reservation, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
 			// fs.ErrExist included: the caller turns it into the "pick a
@@ -371,6 +374,9 @@ func (a *App) ListProjects() ([]ProjectSummary, error) {
 			continue
 		}
 
+		//nolint:gosec // G304: fullPath is projectPath's output, which sanitises
+		// the id and re-checks that the join landed directly in the data
+		// directory; here the id is a filename that directory listing produced.
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			log.Printf("ListProjects: skipping %q: %v", filename, err)
@@ -428,6 +434,9 @@ func (a *App) LoadProject(id string) (*FlowData, error) {
 		return nil, err
 	}
 
+	//nolint:gosec // G304: the id was validated by projectPath above, which
+	// rejects anything that is not a bare filename and then confirms the joined
+	// path is directly inside the app data directory.
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read project %q: %w", cleanID, err)
@@ -468,6 +477,8 @@ func (a *App) LoadLastFile() (*FlowData, error) {
 		return nil, nil
 	}
 
+	//nolint:gosec // G304: as in LoadProject - projectPath has already reduced
+	// the recorded id to a bare filename inside the app data directory.
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

@@ -372,9 +372,20 @@ func executeMouseClickTask(task Task, app *App) {
 
 		for i := 0; i < int(numberOfClicks); i++ {
 			if releaseAfterPress {
-				robotgo.MouseDown(buttonType)
+				// Logged rather than returned, like every other robotgo failure
+				// in this file: the handler cannot return an error, and one
+				// click of a run failing is not a reason to abandon the rest.
+				if err := robotgo.MouseDown(buttonType); err != nil {
+					log.Printf("MouseDown error: %v for task %s", err, task.ID)
+				}
 				time.Sleep(pressDuration)
-				robotgo.MouseUp(buttonType)
+				// Released even if the press above failed. A button left
+				// physically down is the one outcome worth avoiding here - see
+				// the deferred release in executeMouseMoveTask - and releasing
+				// one that is already up costs nothing.
+				if err := robotgo.MouseUp(buttonType); err != nil {
+					log.Printf("MouseUp error: %v for task %s", err, task.ID)
+				}
 			} else {
 				robotgo.Click(buttonType)
 			}

@@ -1,0 +1,49 @@
+version: "2"
+linters:
+  default: standard          # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - nilnesserr
+    - revive
+  settings:
+    gosec:
+      # G104/G115: unhandled errors and integer conversions, both covered
+      #   better elsewhere (errcheck) or too noisy to be useful here.
+      # G301/G302: this app deliberately creates its config and data
+      #   directories 0755 and its macro files 0644 - a saved macro is an
+      #   ordinary user document, and writeMacroFile in backend/persistence.go
+      #   widens CreateTemp's 0600 on purpose and says so. The rule is also
+      #   inconsistent: it flags os.OpenFile(.., 0644) but not the identical
+      #   (*os.File).Chmod(0644) thirty lines later.
+      # G304: every os.ReadFile here takes either a fixed app-owned filename or
+      #   a path from backend.projectPath, which sanitises the id and then
+      #   re-checks that the joined path landed directly in the data directory.
+      #   Kept out of this list and suppressed per call site instead, so the
+      #   invariant is stated where a reader can check it.
+      # G404: there is no cryptography in this app. Both math/rand uses are
+      #   human-like timing jitter for mouse moves and delay nodes, where a
+      #   CSPRNG would buy nothing and cost an allocation per draw.
+      excludes: [G104, G115, G301, G302, G404]
+    govet:
+      enable: [shadow, nilness]
+    revive:
+      rules:
+        - name: early-return
+        - name: unused-parameter
+        - name: context-as-argument
+        - name: defer
+        - name: errorf
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: unreachable-code
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck]
+formatters:
+  enable: [gofmt, goimports]

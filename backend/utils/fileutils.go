@@ -137,6 +137,8 @@ func configFilePath() (string, error) {
 // readConfig parses the settings file, reporting false for every reason there
 // is nothing usable to read - which the callers treat as "no settings yet".
 func readConfig(path string) (Config, bool) {
+	//nolint:gosec // G304: path is configFilePath's output - the fixed
+	// config.json inside the app's own config directory, never user input.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -204,12 +206,15 @@ func writeConfig(path string, cfg Config) error {
 // the backend package each carried a verbatim copy. Two copies of a rule this
 // easy to get subtly wrong are two places to fix it and one to forget.
 func WriteSyncClose(file *os.File, data []byte) error {
+	// The Close errors on these two paths are discarded on purpose: the write or
+	// the sync has already failed, that is the error worth reporting, and
+	// closing is only here so the descriptor is not leaked on the way out.
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	return file.Close()
@@ -228,6 +233,8 @@ func WriteSyncClose(file *os.File, data []byte) error {
 func adoptLegacyLastOpened(configPath string) Config {
 	legacyPath := legacyLastOpenedPath(configPath)
 
+	//nolint:gosec // G304: legacyPath is the fixed last_opened_file.txt beside
+	// config.json in the app's own config directory, never user input.
 	data, err := os.ReadFile(legacyPath)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {

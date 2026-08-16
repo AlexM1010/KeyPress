@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-//=============================================== Flow Execution ===============================================
+// =============================================== Flow Execution ===============================================
 
 const (
 	// taskBufferSize is the capacity of the queue's task channel.
@@ -98,7 +98,7 @@ func (q *TaskQueue) Start(workerCount int) {
 
 	for i := 0; i < workerCount; i++ {
 		q.wg.Add(1)
-		go q.worker(i, ctx, tasks)
+		go q.worker(ctx, i, tasks)
 	}
 	log.Printf("TaskQueue started with %d workers", workerCount)
 }
@@ -128,7 +128,7 @@ func (q *TaskQueue) Current() (uint64, context.Context) {
 // worker processes tasks from the queue. It is bound to the context and
 // channel of the generation it was started for, so a later generation never
 // disturbs it.
-func (q *TaskQueue) worker(workerID int, ctx context.Context, tasks <-chan Task) {
+func (q *TaskQueue) worker(ctx context.Context, workerID int, tasks <-chan Task) {
 	defer q.wg.Done()
 	log.Printf("Worker %d started", workerID)
 	for {

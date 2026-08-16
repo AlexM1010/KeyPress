@@ -173,7 +173,7 @@ func (a *App) startFlow(flowData FlowData) error {
 
 	// Start a goroutine to handle task completions. It starts with one task in
 	// flight: the Start node just enqueued above.
-	go a.handleCompletions(execGen, execCtx)
+	go a.handleCompletions(execCtx, execGen)
 
 	return nil
 }
@@ -329,7 +329,7 @@ func (a *App) notifyTaskCompletion(ctx context.Context, taskID string) {
 }
 
 // handleCompletions listens for completed tasks and enqueues dependent tasks.
-// gen and ctx are the task queue generation and context of the run it was
+// ctx and gen are the task queue context and generation of the run it was
 // started for, captured together by startFlow. Every task this goroutine
 // submits carries gen, so work belonging to a run that has since been stopped
 // is refused by the queue rather than executed by whatever run came next.
@@ -351,7 +351,7 @@ func (a *App) notifyTaskCompletion(ctx context.Context, taskID string) {
 // happens here, apart from the Start node that StartExecution enqueues just
 // before starting this goroutine, which is what it counts to begin with - so
 // it needs no lock of its own.
-func (a *App) handleCompletions(gen uint64, ctx context.Context) {
+func (a *App) handleCompletions(ctx context.Context, gen uint64) {
 	inFlight := 1
 
 	for {
